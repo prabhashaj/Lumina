@@ -107,3 +107,58 @@ export interface ExamPrepSession {
   updatedAt: string
   overallProgress: number   // 0-100
 }
+
+// ── Personalized Learning Types ──────────────────────────────
+
+export type KnowledgeLevel = 'beginner' | 'intermediate' | 'advanced'
+export type LearningStyle = 'visual' | 'textual' | 'example-driven' | 'practice-heavy'
+export type PersonalizedTopicStatus = 'not-started' | 'in-progress' | 'completed'
+
+export interface AssessmentQuestion {
+  id: string
+  question: string
+  options: string[]
+  correctIndex: number
+  difficulty: 'foundational' | 'intermediate' | 'advanced'
+  cognitiveLevel: string
+  subTopic: string
+}
+
+export interface PlanTopic {
+  title: string
+  reason: string
+  approach: string
+  estimatedMinutes: number
+  status?: PersonalizedTopicStatus
+  content?: TopicContent
+}
+
+export interface LearningPhase {
+  phase: number
+  title: string
+  description: string
+  topics: PlanTopic[]
+  technique: string
+}
+
+export interface LearnerProfile {
+  knowledgeLevel: KnowledgeLevel
+  overallScore: number
+  strengthAreas: string[]
+  weaknessAreas: string[]
+  learningPlan: LearningPhase[]
+  personalizedTips: string[]
+  recommendedStyle: LearningStyle
+  motivationalNote: string
+}
+
+export interface PersonalizedSession {
+  id: string
+  subject: string
+  profile: LearnerProfile
+  assessmentQuestions: AssessmentQuestion[]
+  assessmentAnswers: number[]
+  createdAt: string
+  updatedAt: string
+  overallProgress: number // 0-100
+}

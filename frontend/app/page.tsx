@@ -6,6 +6,7 @@ import Header from '@/components/Header'
 import { AppMode } from '@/components/Header'
 import ChatHistorySidebar from '@/components/ChatHistorySidebar'
 import ExamPrepMode from '@/components/exam-prep/ExamPrepMode'
+import PersonalizedMode from '@/components/personalized/PersonalizedMode'
 import { Message, ChatSession } from '@/lib/types'
 import {
   loadChatSessions,
@@ -184,8 +185,10 @@ export default function Home() {
               setMessages={setMessages}
               onMessagesChange={handleMessagesChange}
             />
-          ) : (
+          ) : mode === 'exam-prep' ? (
             <ExamPrepMode />
+          ) : (
+            <PersonalizedMode />
           )}
         </main>
       </div>

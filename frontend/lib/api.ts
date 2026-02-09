@@ -216,3 +216,99 @@ export async function generateQuiz(
 
   return response.json()
 }
+
+// ── Personalized Learning API ──────────────────────────────
+
+export async function generateAssessment(topic: string): Promise<{
+  topic: string
+  questions: { id: string; question: string; options: string[]; correctIndex: number; difficulty: string; cognitiveLevel: string; subTopic: string }[]
+}> {
+  const response = await fetch(`${API_URL}/api/personalized/assess`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Assessment generation failed: ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export async function analyzeLearnerProfile(
+  topic: string,
+  questions: any[],
+  answers: number[]
+): Promise<any> {
+  const response = await fetch(`${API_URL}/api/personalized/analyze-profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic, questions, answers }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Profile analysis failed: ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export async function streamPersonalizedContent(
+  topic: string,
+  knowledgeLevel: string,
+  weakAreas: string[],
+  strongAreas: string[],
+  learningStyle: string,
+  approach: string,
+  phaseTitle: string,
+  subject: string,
+  onChunk: (chunk: any) => void
+): Promise<void> {
+  const response = await fetch(`${API_URL}/api/personalized/learn/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      topic,
+      knowledgeLevel,
+      weakAreas,
+      strongAreas,
+      learningStyle,
+      approach,
+      phaseTitle,
+      subject,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Personalized content generation failed: ${response.status}`)
+  }
+
+  const reader = response.body?.getReader()
+  const decoder = new TextDecoder()
+
+  if (!reader) throw new Error('No reader available')
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value)
+      const lines = chunk.split('\n')
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6))
+            onChunk(parsed)
+          } catch (e) {
+            console.error('Failed to parse chunk:', e)
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}

@@ -2,6 +2,7 @@
 FastAPI main application
 """
 import sys
+import re
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -19,6 +20,79 @@ from loguru import logger
 from config.settings import settings
 from graph.orchestrator import ResearchOrchestrator
 from shared.schemas.models import ResearchRequest, TeachingResponse, ErrorResponse
+
+
+def _safe_json_loads(raw: str) -> dict:
+    """Parse JSON from LLM output, handling various malformed JSON issues."""
+    import re as _re
+
+    # Step 1: Try direct parse
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 2: Clean common LLM JSON issues
+    cleaned = raw
+    # Remove trailing commas before } or ]
+    cleaned = _re.sub(r',\s*([}\]])', r'\1', cleaned)
+    # Fix invalid escape sequences
+    cleaned = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 3: Try to extract just the outermost JSON object more carefully
+    # Find the first { and match braces
+    start = raw.find('{')
+    if start == -1:
+        raise ValueError("No JSON object found in LLM response")
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    end = start
+    for i in range(start, len(raw)):
+        c = raw[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\':
+            escape_next = True
+            continue
+        if c == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    extracted = raw[start:end]
+    # Clean the extracted JSON
+    extracted = _re.sub(r',\s*([}\]])', r'\1', extracted)
+    extracted = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', extracted)
+    try:
+        return json.loads(extracted)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 4: Last resort — use ast.literal_eval-style cleanup
+    # Remove control characters except \n \r \t
+    extracted = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', extracted)
+    # Replace single quotes with double quotes (in case LLM used Python-style)
+    try:
+        return json.loads(extracted)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parse failed after all fixes. Error: {e}")
+        logger.error(f"First 500 chars of raw: {raw[:500]}")
+        raise ValueError(f"Could not parse JSON from LLM response: {e}")
 
 
 # Initialize logger
@@ -586,6 +660,313 @@ Be specific and thorough."""
     except Exception as e:
         logger.error(f"VLM analysis error: {str(e)}")
         return f"Image uploaded. VLM analysis unavailable: {str(e)}"
+
+
+# ── Personalized Learning Endpoints ──────────────────────────────
+
+@app.post("/api/personalized/assess")
+async def generate_assessment(request: dict):
+    """Generate adaptive assessment questions to gauge the user's knowledge level on a topic"""
+    try:
+        topic = request.get("topic", "").strip()
+        if not topic:
+            raise HTTPException(status_code=400, detail="No topic provided")
+
+        logger.info(f"Generating assessment for topic: {topic}")
+
+        if not orchestrator:
+            raise HTTPException(status_code=503, detail="Service not initialized")
+
+        agent = orchestrator.teaching_agent
+
+        prompt = f"""You are an expert educational assessor. Create a diagnostic assessment to gauge a student's 
+knowledge level on the topic: "{topic}".
+
+Generate exactly 6 questions that progressively increase in difficulty:
+- Questions 1-2: Foundational / Recall (tests basic awareness)
+- Questions 3-4: Intermediate / Application (tests understanding & ability to apply)
+- Questions 5-6: Advanced / Analysis (tests deep understanding & critical thinking)
+
+Each question should have 4 options with exactly one correct answer.
+
+Rules:
+- Questions must cleanly test different depth levels of the topic
+- Wrong options should be plausible but clearly distinguishable for someone who knows the material
+- Include a brief tag for the cognitive level being tested
+- Include which sub-area of the topic this question covers
+
+Return ONLY valid JSON in this exact format:
+{{
+  "topic": "{topic}",
+  "questions": [
+    {{
+      "id": "q_0",
+      "question": "The question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndex": 0,
+      "difficulty": "foundational",
+      "cognitiveLevel": "recall",
+      "subTopic": "Brief sub-topic label"
+    }}
+  ]
+}}"""
+
+        llm_response = await agent._call_llm(prompt)
+
+        import re
+        json_match = re.search(r'\{[\s\S]*\}', llm_response)
+        if not json_match:
+            raise ValueError("Could not parse assessment from LLM response")
+
+        raw_json = json_match.group()
+        assessment = _safe_json_loads(raw_json)
+        return assessment
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Assessment generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/personalized/analyze-profile")
+async def analyze_learner_profile(request: dict):
+    """Analyze assessment answers to build a detailed learner profile"""
+    try:
+        topic = request.get("topic", "").strip()
+        questions = request.get("questions", [])
+        answers = request.get("answers", [])
+
+        if not topic or not questions or not answers:
+            raise HTTPException(status_code=400, detail="Missing topic, questions, or answers")
+
+        if not orchestrator:
+            raise HTTPException(status_code=503, detail="Service not initialized")
+
+        logger.info(f"Analyzing learner profile for: {topic}")
+
+        # Calculate score and identify patterns
+        total = len(questions)
+        correct = 0
+        foundational_correct = 0
+        foundational_total = 0
+        intermediate_correct = 0
+        intermediate_total = 0
+        advanced_correct = 0
+        advanced_total = 0
+        weak_areas = []
+        strong_areas = []
+
+        for i, q in enumerate(questions):
+            user_answer = answers[i] if i < len(answers) else -1
+            is_correct = user_answer == q.get("correctIndex", -1)
+            difficulty = q.get("difficulty", "foundational")
+            sub_topic = q.get("subTopic", "General")
+
+            if is_correct:
+                correct += 1
+                strong_areas.append(sub_topic)
+            else:
+                weak_areas.append(sub_topic)
+
+            if difficulty == "foundational":
+                foundational_total += 1
+                if is_correct:
+                    foundational_correct += 1
+            elif difficulty == "intermediate":
+                intermediate_total += 1
+                if is_correct:
+                    intermediate_correct += 1
+            else:
+                advanced_total += 1
+                if is_correct:
+                    advanced_correct += 1
+
+        score_pct = round((correct / total) * 100) if total > 0 else 0
+
+        # Determine knowledge level
+        if score_pct >= 80:
+            knowledge_level = "advanced"
+        elif score_pct >= 50:
+            knowledge_level = "intermediate"
+        else:
+            knowledge_level = "beginner"
+
+        # Determine learning style hints from patterns
+        agent = orchestrator.teaching_agent
+
+        profile_prompt = f"""Based on a student's diagnostic assessment on "{topic}":
+
+Score: {correct}/{total} ({score_pct}%)
+Foundational questions: {foundational_correct}/{foundational_total} correct
+Intermediate questions: {intermediate_correct}/{intermediate_total} correct  
+Advanced questions: {advanced_correct}/{advanced_total} correct
+
+Strong areas: {', '.join(strong_areas) if strong_areas else 'None identified'}
+Weak areas: {', '.join(weak_areas) if weak_areas else 'None identified'}
+
+Create a personalized learning plan. Return ONLY valid JSON:
+{{
+  "knowledgeLevel": "{knowledge_level}",
+  "overallScore": {score_pct},
+  "strengthAreas": {json.dumps(list(set(strong_areas)))},
+  "weaknessAreas": {json.dumps(list(set(weak_areas)))},
+  "learningPlan": [
+    {{
+      "phase": 1,
+      "title": "Phase title",
+      "description": "What this phase covers and why",
+      "topics": [
+        {{
+          "title": "Specific topic title",
+          "reason": "Why the student needs this",
+          "approach": "How we'll teach this (analogies, visuals, practice, etc.)",
+          "estimatedMinutes": 10
+        }}
+      ],
+      "technique": "The learning technique used (e.g., scaffolding, spaced repetition, elaborative interrogation)"
+    }}
+  ],
+  "personalizedTips": [
+    "Tip 1 based on their performance",
+    "Tip 2 based on their weaknesses",
+    "Tip 3 for effective studying"
+  ],
+  "recommendedStyle": "visual|textual|example-driven|practice-heavy",
+  "motivationalNote": "An encouraging, personalized message about their starting point"
+}}
+
+Rules:
+- Create 3-4 phases progressing from their weak areas to mastery
+- Each phase should have 2-3 specific topics
+- Keep topic titles SHORT (under 8 words)
+- Keep all string values SHORT and simple — no special characters or backslashes
+- Tailor the approach based on their knowledge level ({knowledge_level})
+- For beginners: more analogies, visuals, foundational concepts
+- For intermediate: bridge gaps, introduce applications, practice
+- For advanced: deep dives, edge cases, synthesis exercises
+- Do NOT include trailing commas in the JSON
+- Do NOT use any markdown formatting inside the JSON strings
+- Return ONLY the JSON object, nothing else"""
+
+        llm_response = await agent._call_llm(profile_prompt)
+
+        # Try up to 2 attempts
+        last_error = None
+        for attempt in range(2):
+            try:
+                llm_response = await agent._call_llm(profile_prompt)
+
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', llm_response)
+                if not json_match:
+                    raise ValueError("Could not parse profile from LLM response")
+
+                raw_json = json_match.group()
+                profile = _safe_json_loads(raw_json)
+                return profile
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+                logger.warning(f"Profile parse attempt {attempt + 1} failed: {str(e)}, retrying...")
+                continue
+
+        raise ValueError(f"Failed to parse profile after 2 attempts: {last_error}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/personalized/learn/stream")
+async def personalized_learn_stream(request: dict):
+    """Stream personalized learning content for a specific topic, tailored to the learner's profile"""
+    topic = request.get("topic", "")
+    knowledge_level = request.get("knowledgeLevel", "beginner")
+    weak_areas = request.get("weakAreas", [])
+    strong_areas = request.get("strongAreas", [])
+    learning_style = request.get("learningStyle", "example-driven")
+    approach = request.get("approach", "")
+    phase_title = request.get("phaseTitle", "")
+    subject = request.get("subject", "")
+
+    if not topic:
+        raise HTTPException(status_code=400, detail="No topic provided")
+
+    # Build a highly personalized question
+    style_instructions = {
+        "visual": "Use lots of diagrams descriptions, charts, and visual metaphors. Structure content spatially.",
+        "textual": "Use detailed written explanations with clear logical flow and precise definitions.",
+        "example-driven": "Lead with concrete examples before theory. Use real-world scenarios extensively.",
+        "practice-heavy": "Include many practice problems, exercises, and hands-on challenges throughout."
+    }
+
+    style_hint = style_instructions.get(learning_style, style_instructions["example-driven"])
+
+    personalized_question = f"""Teach me about '{topic}' as part of learning {subject} (Phase: {phase_title}).
+
+CRITICAL PERSONALIZATION CONTEXT:
+- My knowledge level: {knowledge_level}
+- My strong areas: {', '.join(strong_areas) if strong_areas else 'Starting fresh'}
+- My weak areas that need attention: {', '.join(weak_areas) if weak_areas else 'General understanding'}
+- Recommended teaching approach: {approach}
+- My preferred learning style: {learning_style}
+
+TEACHING INSTRUCTIONS:
+- {style_hint}
+- {"Start from absolute basics, assume no prior knowledge. Use everyday analogies." if knowledge_level == "beginner" else ""}
+- {"Build on existing knowledge, focus on connections and applications." if knowledge_level == "intermediate" else ""}
+- {"Go deep into nuances, edge cases, and advanced applications. Challenge my thinking." if knowledge_level == "advanced" else ""}
+- Explicitly connect new concepts to my strong areas ({', '.join(strong_areas) if strong_areas else 'basics'}) to aid understanding
+- Pay extra attention to my weak areas: {', '.join(weak_areas) if weak_areas else 'foundational concepts'}
+- Include checkpoint questions throughout to verify understanding
+- End with a "Am I ready to move on?" self-check section
+
+Provide a comprehensive, personalized explanation."""
+
+    async def generate_stream():
+        try:
+            if not orchestrator:
+                yield f"data: {json.dumps({'type': 'error', 'data': 'Service not initialized'})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'status', 'data': f'Personalizing content for your level: {knowledge_level}...'})}\n\n"
+
+            enriched_request = ResearchRequest(question=personalized_question)
+            response = await orchestrator.process_question(enriched_request)
+
+            yield f"data: {json.dumps({'type': 'status', 'data': 'Tailoring explanation to your learning style...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'topic', 'data': topic})}\n\n"
+            yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
+
+            for img in response.images:
+                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
+
+            for source in response.sources:
+                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
+
+            for q in response.practice_questions:
+                yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Personalized content streaming error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 if __name__ == "__main__":

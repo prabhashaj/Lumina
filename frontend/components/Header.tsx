@@ -1,8 +1,8 @@
 'use client'
 
-import { Search, PanelLeftOpen, PanelLeftClose, Plus, GraduationCap, MessageSquare, Sparkles } from 'lucide-react'
+import { Search, PanelLeftOpen, PanelLeftClose, Plus, GraduationCap, MessageSquare, Sparkles, User } from 'lucide-react'
 
-export type AppMode = 'chat' | 'exam-prep'
+export type AppMode = 'chat' | 'exam-prep' | 'personalized'
 
 interface HeaderProps {
   isSidebarOpen: boolean
@@ -64,6 +64,17 @@ export default function Header({ isSidebarOpen, onToggleSidebar, onNewChat, mode
             >
               <GraduationCap className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Exam Prep</span>
+            </button>
+            <button
+              onClick={() => onModeChange('personalized')}
+              className={`flex items-center gap-1.5 px-4 py-[7px] rounded-[10px] text-xs font-semibold transition-all duration-200 ${
+                mode === 'personalized'
+                  ? 'bg-gradient-to-r from-[hsl(73,31%,45%)] to-[hsl(73,31%,50%)] text-white shadow-md shadow-[hsl(73,31%,45%)]/25'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Personalized</span>
             </button>
           </div>
 

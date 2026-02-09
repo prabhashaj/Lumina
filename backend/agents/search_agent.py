@@ -57,9 +57,11 @@ class WebSearchAgent:
                 results.append(result)
             
             # Add images to top result if available
-            if include_images and response.get("images"):
+            tavily_images = response.get("images", [])
+            logger.info(f"Tavily returned {len(tavily_images)} images for query: {query[:80]}")
+            if include_images and tavily_images:
                 if results:
-                    results[0].images = response["images"][:settings.max_images_per_response]
+                    results[0].images = tavily_images[:settings.max_images_per_response]
             
             logger.info(f"Found {len(results)} search results")
             return results
@@ -80,10 +82,19 @@ class WebSearchAgent:
         """
         all_results = []
         seen_urls = set()
+        all_image_urls: List[str] = []
+        seen_image_urls = set()
         
         for query in queries:
             results = await self.search(query)
             for result in results:
+                # Collect images from every result before deduplication
+                for img_url in result.images:
+                    normalized = img_url.lower().split('?')[0]
+                    if normalized not in seen_image_urls:
+                        all_image_urls.append(img_url)
+                        seen_image_urls.add(normalized)
+
                 if result.url not in seen_urls:
                     all_results.append(result)
                     seen_urls.add(result.url)
@@ -91,5 +102,15 @@ class WebSearchAgent:
         # Sort by score
         all_results.sort(key=lambda x: x.score, reverse=True)
         
-        logger.info(f"Multi-query search: {len(queries)} queries → {len(all_results)} unique results")
-        return all_results[:self.max_results]
+        # Ensure images are attached to the top result so the orchestrator finds them
+        top_results = all_results[:self.max_results]
+        if all_image_urls and top_results:
+            # Merge collected images into the first result
+            existing = set((u.lower().split('?')[0]) for u in top_results[0].images)
+            for img_url in all_image_urls:
+                if img_url.lower().split('?')[0] not in existing:
+                    top_results[0].images.append(img_url)
+                    existing.add(img_url.lower().split('?')[0])
+        
+        logger.info(f"Multi-query search: {len(queries)} queries → {len(top_results)} unique results, {len(all_image_urls)} images collected")
+        return top_results
