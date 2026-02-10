@@ -348,6 +348,24 @@ Complete exam preparation system with structured learning
 - Smooth, ChatGPT-like experience
 - No waiting for full response
 
+### Personalized Mode
+Tailors the learning experience to each user by creating adaptive, data-driven learning plans and tracking progress over time.
+
+- **Adaptive Learning Paths:** Automatically generates a personalized roadmap based on the user's goals, strengths, and weaknesses. Topics are ordered and paced to optimize mastery.
+- **Dynamic Difficulty:** Questions, explanations, and examples are adjusted to the user's current competency level and updated as they improve.
+- **Personalized Assessments:** Generates quizzes and practice questions specific to the user's learning path, with automatic scoring, explanations, and remediation suggestions.
+- **Spaced Repetition & Review:** Integrated review scheduling surfaces previously learned items at optimal intervals to improve long-term retention.
+- **Visual & Contextual Recommendations:** Prioritizes relevant images, diagrams, and example-driven explanations tailored to the learner's needs.
+- **Progress Dashboard:** Track mastery, streaks, time spent, and recommended next steps. Export progress or download study summaries.
+- **Privacy-first Sync:** Local-first storage for learning state with optional encrypted cloud sync for cross-device continuity.
+- **Teacher / Mentor Mode:** Instructors can seed curricula, review learner progress, and share curated content (optional administrator features).
+
+Technical notes:
+- Frontend: `PersonalizedMode` UI components live in the frontend and connect to the user's profile and local storage to render plans, quizzes, and progress visuals.
+- Backend: Personalization relies on user profiles, vector embeddings (FAISS), and a scoring engine that ranks topics and items by relevance and mastery. Spaced-repetition scheduling and assessment grading run on backend services (or in-browser for offline-first setups).
+- Data: All personalization signals (answers, quiz performance, time-on-task) are stored to improve recommendations; defaults favor local storage unless the user opts into cloud sync.
+
+
 ## 🧪 API Documentation
 
 ### Research Endpoints
