@@ -27,64 +27,64 @@ This is a complete, production-ready AI teaching assistant that doesn't just ans
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Student Question                      │
+│                        Student Question                     │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph Orchestrator                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  1. Intent Classifier Agent                          │  │
-│  │     • Difficulty (beginner/intermediate/advanced)    │  │
-│  │     • Question type (conceptual/practical/math)      │  │
-│  │     • Learning needs (visuals, code, etc.)           │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                         │                                    │
-│                         ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  2. Web Search Agent (Tavily)                        │  │
-│  │     • Multi-query search strategy                    │  │
-│  │     • Source ranking & filtering                     │  │
-│  │     • Image collection                               │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                         │                                    │
-│                         ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  3. Content Extraction Agent                         │  │
-│  │     • Clean text extraction                          │  │
-│  │     • Relevance filtering                            │  │
-│  │     • Source credibility assessment                  │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                         │                                    │
-│                         ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  4. Image Understanding Agent (VLM)                  │  │
-│  │     • Image captioning                               │  │
-│  │     • Diagram understanding                          │  │
-│  │     • Relevance scoring                              │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                         │                                    │
-│                         ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  5. Teaching Synthesis Agent                         │  │
-│  │     • Comprehensive explanation                      │  │
-│  │     • Analogies & examples                           │  │
-│  │     • Practice questions                             │  │
-│  │     • Adaptive language                              │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                         │                                    │
-│                         ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  6. Quality Assessment                               │  │
-│  │     • Completeness check                             │  │
-│  │     • Accuracy verification                          │  │
-│  │     • Retry logic if quality < threshold             │  │
-│  └──────────────────────────────────────────────────────┘  │
+│                    LangGraph Orchestrator                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  1. Intent Classifier Agent                          │   │
+│  │     • Difficulty (beginner/intermediate/advanced)    │   │
+│  │     • Question type (conceptual/practical/math)      │   │
+│  │     • Learning needs (visuals, code, etc.)           │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                         │                                   │
+│                         ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  2. Web Search Agent (Tavily)                        │   │
+│  │     • Multi-query search strategy                    │   │
+│  │     • Source ranking & filtering                     │   │
+│  │     • Image collection                               │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                         │                                   │
+│                         ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  3. Content Extraction Agent                         │   │
+│  │     • Clean text extraction                          │   │
+│  │     • Relevance filtering                            │   │
+│  │     • Source credibility assessment                  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                         │                                   │
+│                         ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  4. Image Understanding Agent (VLM)                  │   │
+│  │     • Image captioning                               │   │
+│  │     • Diagram understanding                          │   │
+│  │     • Relevance scoring                              │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                         │                                   │
+│                         ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  5. Teaching Synthesis Agent                         │   │
+│  │     • Comprehensive explanation                      │   │
+│  │     • Analogies & examples                           │   │
+│  │     • Practice questions                             │   │
+│  │     • Adaptive language                              │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                         │                                   │
+│                         ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  6. Quality Assessment                               │   │
+│  │     • Completeness check                             │   │
+│  │     • Accuracy verification                          │   │
+│  │     • Retry logic if quality < threshold             │   │
+│  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Comprehensive Teaching Response                 │
+│              Comprehensive Teaching Response                │
 │  • TL;DR • Step-by-step explanation • Visual aids           │
 │  • Analogies • Practice questions • Source citations        │
 └─────────────────────────────────────────────────────────────┘
