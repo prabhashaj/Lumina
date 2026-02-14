@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     
     # TTS Configuration
-    tts_voice_id: str = "EXAVITQu4vr4xnSDxMaL"  # Bella - soft, warm female voice
-    tts_model: str = "eleven_monolingual_v1"
+    tts_voice_id: str = "XB0fDUnXU5powFXDhCwa"  # Charlotte - soft, warm, realistic female voice
+    tts_model: str = "eleven_multilingual_v2"  # Most natural-sounding model
     
     # Redis Configuration
     redis_host: str = "localhost"

@@ -19,6 +19,7 @@ import {
 import AssessmentView from './AssessmentView'
 import LearningPlanView from './LearningPlanView'
 import PersonalizedContentView from './PersonalizedContentView'
+import GuideChatbot from '../shared/GuideChatbot'
 import {
   Brain,
   Loader2,
@@ -191,9 +192,18 @@ export default function PersonalizedMode() {
 
   // ── Render ──────────────────────────────
 
+  const guideContext = session
+    ? `Subject: ${session.subject}. Knowledge level: ${session.profile.knowledgeLevel}. Learning style: ${session.profile.recommendedStyle}. ${
+        view === 'content' && activeTopic
+          ? `Currently studying: ${activeTopic.title}`
+          : `Viewing learning plan with ${session.profile.learningPlan.length} phases, ${session.overallProgress}% complete`
+      }`
+    : 'Student is on the personalized learning landing page.'
+
   // Content view
   if (view === 'content' && session && activeTopic && activePhase) {
     return (
+      <>
       <PersonalizedContentView
         subject={session.subject}
         topic={activeTopic}
@@ -202,6 +212,8 @@ export default function PersonalizedMode() {
         onBack={handleBackToPlan}
         onMarkComplete={handleMarkComplete}
       />
+      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" />
+      </>
     )
   }
 
@@ -219,6 +231,7 @@ export default function PersonalizedMode() {
   // Learning plan view
   if (view === 'plan' && session) {
     return (
+      <>
       <LearningPlanView
         subject={session.subject}
         profile={session.profile}
@@ -228,6 +241,8 @@ export default function PersonalizedMode() {
           setSavedSessions(loadPersonalizedSessions())
         }}
       />
+      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" />
+      </>
     )
   }
 
@@ -271,6 +286,7 @@ export default function PersonalizedMode() {
 
   // ── Landing View ──
   return (
+    <>
     <div className="flex-1 overflow-y-auto relative">
       {/* Ambient orbs */}
       <div className="orb orb-primary w-[250px] h-[250px] top-[5%] right-[10%] animate-float" />
@@ -424,5 +440,6 @@ export default function PersonalizedMode() {
         )}
       </div>
     </div>
+    </>
   )
 }

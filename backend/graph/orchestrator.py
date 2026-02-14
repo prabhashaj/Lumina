@@ -259,18 +259,27 @@ class ResearchOrchestrator:
         raw_images = metadata.get("raw_images", [])
         concepts = intent.key_concepts if intent else []
 
+        # Extract a clean, short topic from the (possibly very long) question
+        # This prevents full personalization prompts from leaking into image captions
+        clean_topic = original_question.strip().split('\n')[0][:120]
+        # Remove any prompt instructions that leak into topic
+        for prefix in ["Teach me about '", "Teach me about "]:
+            if clean_topic.startswith(prefix):
+                clean_topic = clean_topic[len(prefix):].rstrip("'").split("'")[0]
+                break
+        # Also strip anything after common prompt markers
+        for marker in [" CRITICAL ", " TEACHING INSTRUCTIONS", " PERSONALIZATION", " Rules:", " Generate "]:
+            if marker in clean_topic:
+                clean_topic = clean_topic[:clean_topic.index(marker)].strip()
+        if not clean_topic:
+            clean_topic = " ".join(concepts[:3]) if concepts else "topic"
+        logger.info(f"Clean topic for image processing: {clean_topic}")
+
         # Fallback: if no images were found in the primary search, do a dedicated image search
         if not raw_images:
             logger.info("No images from primary search — running dedicated image search...")
-            # Extract a short topic from the (possibly very long) question
-            short_topic = original_question.strip().split('\n')[0][:120]
-            # Remove any prompt instructions that leak into topic
-            for prefix in ["Teach me about '", "Teach me about "]:
-                if short_topic.startswith(prefix):
-                    short_topic = short_topic[len(prefix):].rstrip("'").split("'")[0]
-                    break
             try:
-                image_query = f"{short_topic} diagram illustration"
+                image_query = f"{clean_topic} diagram illustration"
                 image_results = await self.search_agent.search(
                     query=image_query,
                     search_depth="basic",
@@ -289,7 +298,7 @@ class ResearchOrchestrator:
         if raw_images:
             images = await self.image_agent.process_images(
                 raw_images,
-                original_question,
+                clean_topic,
                 concepts,
                 max_images=2  # Limit to exactly 2 best unique images
             )

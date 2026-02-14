@@ -325,7 +325,7 @@ export default function PersonalizedContentView({
                     <div
                       key={img.url}
                       className="group relative rounded-2xl overflow-hidden bg-muted/50 border border-border/30 hover:border-[hsl(73,31%,45%)]/30 shadow-lg shadow-black/5 hover:shadow-xl transition-all duration-300 cursor-pointer"
-                      onClick={() => openLightbox(img.url, img.caption || img.alt_text || '')}
+                      onClick={() => openLightbox(img.url, (img.caption || img.alt_text || '').slice(0, 120))}
                     >
                       <div className="aspect-[16/10] overflow-hidden">
                         {/* eslint-disable-next-line @next/next/no-img-element */}

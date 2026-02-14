@@ -5,13 +5,19 @@ import MessageBubble from './MessageBubble'
 
 interface MessageListProps {
   messages: Message[]
+  onFollowUpClick?: (text: string) => void
 }
 
-export default function MessageList({ messages }: MessageListProps) {
+export default function MessageList({ messages, onFollowUpClick }: MessageListProps) {
   return (
     <div className="space-y-6">
-      {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+      {messages.map((message, idx) => (
+        <MessageBubble
+          key={message.id}
+          message={message}
+          onFollowUpClick={onFollowUpClick}
+          isLast={idx === messages.length - 1}
+        />
       ))}
     </div>
   )

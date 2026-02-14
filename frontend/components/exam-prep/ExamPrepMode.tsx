@@ -13,6 +13,7 @@ import {
 import RoadmapView from './RoadmapView'
 import TopicContentView from './TopicContentView'
 import QuizView from './QuizView'
+import GuideChatbot from '../shared/GuideChatbot'
 import {
   GraduationCap,
   Loader2,
@@ -256,9 +257,21 @@ export default function ExamPrepMode() {
     setQuizQuestions([])
   }
 
+  // ── Compute guide context ──
+  const guideContext = session
+    ? `Subject: ${session.subject}. ${
+        view === 'topic' && session.chapters[activeCh]?.topics[activeTopic]
+          ? `Currently studying: ${session.chapters[activeCh]?.title} > ${session.chapters[activeCh]?.topics[activeTopic]?.title}`
+          : view === 'quiz'
+          ? `Taking quiz on: ${session.chapters[activeCh]?.topics[activeTopic]?.title}`
+          : `Viewing roadmap with ${session.chapters.length} chapters, ${session.overallProgress}% complete`
+      }`
+    : 'Student is on the exam prep landing page.'
+
   // ── Landing View ──
   if (view === 'landing') {
     return (
+      <>
       <div className="flex-1 overflow-y-auto relative">
         {/* Ambient orbs */}
         <div className="orb orb-primary w-[250px] h-[250px] top-[5%] right-[10%] animate-float" />
@@ -395,12 +408,14 @@ export default function ExamPrepMode() {
           )}
         </div>
       </div>
+      </>
     )
   }
 
   // ── Roadmap View ──
   if (view === 'roadmap' && session) {
     return (
+      <>
       <RoadmapView
         subject={session.subject}
         chapters={session.chapters}
@@ -411,6 +426,8 @@ export default function ExamPrepMode() {
           setSavedSessions(loadExamPrepSessions())
         }}
       />
+      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" />
+      </>
     )
   }
 
@@ -419,6 +436,7 @@ export default function ExamPrepMode() {
     const topic = session.chapters[activeCh]?.topics[activeTopic]
 
     return (
+      <>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 animate-fadeIn">
           {/* Breadcrumb */}
@@ -493,6 +511,8 @@ export default function ExamPrepMode() {
           )}
         </div>
       </div>
+      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" />
+      </>
     )
   }
 
@@ -501,6 +521,7 @@ export default function ExamPrepMode() {
     const topic = session.chapters[activeCh]?.topics[activeTopic]
 
     return (
+      <>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 animate-fadeIn">
           {/* Breadcrumb */}
@@ -522,6 +543,7 @@ export default function ExamPrepMode() {
           />
         </div>
       </div>
+      </>
     )
   }
 

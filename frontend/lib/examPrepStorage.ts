@@ -60,7 +60,7 @@ export function createExamPrepSession(
     topics: ch.topics.map((topicTitle, tIdx) => ({
       id: `ch${chIdx}_t${tIdx}`,
       title: topicTitle,
-      status: chIdx === 0 && tIdx === 0 ? 'available' : 'locked',
+      status: 'available' as const,
     })),
   }))
 

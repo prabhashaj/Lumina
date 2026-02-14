@@ -2,16 +2,18 @@
 
 import { useState, useRef } from 'react'
 import { Message } from '@/lib/types'
-import { User, Sparkles, Loader2, ExternalLink, Image as ImageIcon, ZoomIn, ZoomOut, X, Maximize2, Volume2, VolumeX, FileText } from 'lucide-react'
+import { User, Sparkles, Loader2, ExternalLink, Image as ImageIcon, ZoomIn, ZoomOut, X, Maximize2, Volume2, VolumeX, FileText, ArrowRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { textToSpeech } from '@/lib/api'
 
 interface MessageBubbleProps {
   message: Message
+  onFollowUpClick?: (text: string) => void
+  isLast?: boolean
 }
 
-export default function MessageBubble({ message }: MessageBubbleProps) {
+export default function MessageBubble({ message, onFollowUpClick, isLast }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const [lightbox, setLightbox] = useState<{ url: string; caption: string } | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -292,7 +294,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                     <div
                       key={img.url}
                       className="group relative rounded-2xl overflow-hidden bg-muted/50 border border-border/30 hover:border-[hsl(73,31%,45%)]/30 shadow-lg shadow-black/5 hover:shadow-xl transition-all duration-300 cursor-pointer"
-                      onClick={() => openLightbox(img.url, img.caption || img.alt_text || '')}
+                      onClick={() => openLightbox(img.url, (img.caption || img.alt_text || '').slice(0, 120))}
                     >
                       <div className="aspect-[16/10] overflow-hidden">
                         <img
@@ -411,6 +413,25 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                       <ExternalLink className="w-3 h-3 text-muted-foreground/40 group-hover:text-[hsl(73,31%,45%)] flex-shrink-0 transition-colors mt-0.5" />
                     </div>
                   </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Follow-up Suggestions */}
+          {isLast && message.complete && message.followUpSuggestions && message.followUpSuggestions.length > 0 && onFollowUpClick && (
+            <div className="space-y-2 mt-2 animate-fadeIn">
+              <p className="text-xs text-muted-foreground/60 font-medium uppercase tracking-wider">Continue exploring</p>
+              <div className="flex flex-wrap gap-2">
+                {message.followUpSuggestions.slice(0, 4).map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => onFollowUpClick(suggestion)}
+                    className="group flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-card/50 border border-border/30 hover:border-[hsl(73,31%,45%)]/40 hover:bg-[hsl(73,31%,45%)]/5 text-xs text-muted-foreground hover:text-foreground transition-all duration-200 hover:-translate-y-0.5"
+                  >
+                    <span className="line-clamp-1">{suggestion}</span>
+                    <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-[hsl(73,31%,45%)]" />
+                  </button>
                 ))}
               </div>
             </div>

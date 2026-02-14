@@ -162,3 +162,112 @@ export interface PersonalizedSession {
   updatedAt: string
   overallProgress: number // 0-100
 }
+
+// ── Video Lecture / Slide Types ──────────────────────────────
+
+export type SlideLayout = 'title' | 'default' | 'image-focus' | 'comparison' | 'summary'
+
+export interface Slide {
+  slide_number: number
+  title: string
+  bullet_points: string[]
+  speaker_notes: string
+  image_query: string
+  layout: SlideLayout
+  background_style: string
+  // Injected after narration generation
+  audio_base64?: string
+  use_browser_tts?: boolean
+  narration_text?: string
+  duration_estimate?: number
+  // Resolved image from Unsplash
+  image_url?: string
+}
+
+export interface Presentation {
+  title: string
+  subtitle: string
+  total_slides: number
+  estimated_duration_minutes: number
+  slides: Slide[]
+}
+
+export interface VideoLectureSession {
+  id: string
+  topic: string
+  presentation: Presentation | null
+  createdAt: string
+  status: 'idle' | 'generating' | 'ready' | 'error'
+  error?: string
+}
+
+// ── Doubt Solver Types ──────────────────────────────
+
+export interface DoubtSolverResult {
+  filename: string
+  preview_url: string
+  ocr_text: string
+  solution: string
+}
+
+export interface DoubtMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+  imagePreview?: string       // local data URL for display
+  imageContext?: string       // VLM extracted text
+  isLoading?: boolean
+}
+
+export interface GuideMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+  isLoading?: boolean
+}
+
+// ── Flashcard Types ──────────────────────────────
+
+export interface Flashcard {
+  id: string
+  front: string
+  back: string
+  difficulty: number
+  // SM-2 fields
+  easeFactor: number
+  interval: number // days
+  repetitions: number
+  nextReview: string // ISO date
+  lastReview?: string
+}
+
+export interface FlashcardDeck {
+  id: string
+  topic: string
+  cards: Flashcard[]
+  createdAt: string
+  updatedAt: string
+  totalReviews: number
+}
+
+export type FlashcardRating = 0 | 1 | 2 | 3 | 4 | 5
+// 0 = total blackout, 1 = wrong, 2 = wrong but recalled after seeing answer,
+// 3 = correct with difficulty, 4 = correct, 5 = perfect
+
+// ── Code Playground Types ──────────────────────────────
+
+export interface CodeRunResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+  executionTime: number
+}
+
+export interface CodeExplainResult {
+  result: string
+  action: 'explain' | 'debug' | 'exercise' | 'optimize'
+}
+
+export type CodeLanguage = 'python' | 'javascript'

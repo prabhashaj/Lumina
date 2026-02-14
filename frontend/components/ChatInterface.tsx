@@ -182,6 +182,15 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
     setMessages(prev => [...prev, assistantMessage])
 
     try {
+      // Build conversation history from previous messages for context
+      const conversationHistory = messages
+        .filter(m => m.complete || m.role === 'user')
+        .map(m => ({
+          role: m.role,
+          content: m.role === 'user' ? m.content : (m.tldr || m.content || ''),
+        }))
+        .slice(-10) // Keep last 10 exchanges for context
+
       await streamResearch(
         userMessage.content,
         (chunk) => {
@@ -236,7 +245,8 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
           })
         },
         imageContext || undefined,
-        fileContext || undefined
+        fileContext || undefined,
+        conversationHistory.length > 0 ? conversationHistory : undefined
       )
     } catch (error) {
       console.error('Research error:', error)
@@ -256,48 +266,77 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
   }
 
   const suggestions = [
-    { text: "Explain quantum entanglement?", icon: "🔬" },
-    { text: "How do neural networks learn?", icon: "🧠" },
-    { text: "What is the theory of relativity?", icon: "⚡" },
-    { text: "Explain photosynthesis step by step?", icon: "🌿" },
+    { text: "Explain quantum entanglement simply", icon: "🔬", category: "Physics" },
+    { text: "How do neural networks learn?", icon: "🧠", category: "AI/ML" },
+    { text: "What causes climate change?", icon: "🌍", category: "Science" },
   ]
 
   return (
-    <div className="flex flex-col h-full max-w-5xl mx-auto px-4 sm:px-6">
+    <div className={`flex flex-col h-full w-full px-4 sm:px-6 lg:px-8 ${messages.length === 0 ? 'max-w-7xl mx-auto' : 'max-w-7xl mx-auto'}`}>
       {messages.length === 0 ? (
         <div className="flex-1 flex items-center justify-center relative">
           {/* Ambient background orbs */}
-          <div className="orb orb-primary w-[300px] h-[300px] top-[10%] left-[15%] animate-float" />
-          <div className="orb orb-secondary w-[200px] h-[200px] bottom-[20%] right-[10%] animate-float" style={{ animationDelay: '1.5s' }} />
+          <div className="orb orb-primary w-[400px] h-[400px] top-[5%] left-[10%] animate-float opacity-40" />
+          <div className="orb orb-secondary w-[250px] h-[250px] bottom-[15%] right-[5%] animate-float opacity-30" style={{ animationDelay: '2s' }} />
+          <div className="orb orb-primary w-[180px] h-[180px] top-[60%] left-[60%] animate-float opacity-20" style={{ animationDelay: '4s' }} />
 
-          <div className="text-center space-y-10 max-w-3xl w-full relative z-10 animate-fadeIn">
+          <div className="text-center space-y-12 max-w-3xl w-full relative z-10 animate-fadeIn">
             {/* Hero section */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-center mb-2">
-                <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight animate-lumina-glow">
-                  <span className="bg-gradient-to-r from-[hsl(73,31%,55%)] via-[hsl(73,45%,65%)] to-[hsl(73,31%,45%)] bg-[length:200%_auto] animate-gradient bg-clip-text text-transparent drop-shadow-[0_0_25px_hsl(73,31%,45%,0.35)]">Lumina</span>
-                </h1>
+            <div className="space-y-5">
+              <div className="flex items-center justify-center mb-3">
+                <div className="relative">
+                  <h1 className="text-6xl sm:text-7xl font-extrabold tracking-tight">
+                    <span className="bg-gradient-to-r from-[hsl(73,31%,55%)] via-[hsl(73,50%,65%)] to-[hsl(73,31%,45%)] bg-[length:200%_auto] animate-gradient bg-clip-text text-transparent drop-shadow-[0_0_30px_hsl(73,31%,45%,0.4)]">Lumina</span>
+                  </h1>
+                  <div className="absolute -inset-4 bg-[hsl(73,31%,45%)]/5 rounded-3xl blur-2xl -z-10" />
+                </div>
               </div>
               <h2 className="text-3xl sm:text-4xl font-bold text-foreground tracking-tight">
-                What do you want to <span className="text-gradient">explore</span>?
+                What do you want to <span className="bg-gradient-to-r from-[hsl(73,31%,55%)] to-[hsl(73,45%,60%)] bg-clip-text text-transparent">explore</span>?
               </h2>
-              <p className="text-muted-foreground text-base max-w-md mx-auto">
-                Ask anything — I'll research, explain, and find visuals to help you understand.
+              <p className="text-muted-foreground text-base max-w-lg mx-auto leading-relaxed">
+                Ask anything — I'll research the web, find relevant visuals, and explain it in a way that makes sense to you.
               </p>
             </div>
+
+            {/* Feature badges */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {[
+                { icon: "🔍", label: "Deep Research" },
+                { icon: "🖼️", label: "Visual Aids" },
+                { icon: "💡", label: "Smart Analogies" },
+                { icon: "🔊", label: "Read Aloud" },
+              ].map((feat, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card/60 border border-border/30 text-xs text-muted-foreground backdrop-blur-sm"
+                >
+                  <span>{feat.icon}</span>
+                  <span>{feat.label}</span>
+                </div>
+              ))}
+            </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto stagger-children">
+            {/* Suggestion cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-3xl mx-auto stagger-children">
               {suggestions.map((suggestion, index) => (
                 <button
                   key={index}
                   onClick={() => setInput(suggestion.text)}
-                  className="group relative p-4 text-left bg-card/50 border border-border/40 rounded-2xl hover:bg-card hover:border-[hsl(73,31%,45%)]/30 hover:shadow-lg hover:shadow-[hsl(73,31%,45%)]/5 transition-all duration-300"
+                  className="group relative p-4 text-left bg-card/40 border border-border/30 rounded-2xl hover:bg-card/80 hover:border-[hsl(73,31%,45%)]/40 hover:shadow-xl hover:shadow-[hsl(73,31%,45%)]/8 transition-all duration-300 hover:-translate-y-0.5"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="text-lg">{suggestion.icon}</span>
-                    <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors leading-relaxed">
-                      {suggestion.text}
-                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-[hsl(73,31%,45%)]/8 group-hover:bg-[hsl(73,31%,45%)]/15 flex items-center justify-center flex-shrink-0 transition-colors duration-300">
+                      <span className="text-base">{suggestion.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-foreground/80 group-hover:text-foreground transition-colors leading-snug line-clamp-2">
+                        {suggestion.text}
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground/50 mt-1 uppercase tracking-wider font-medium">
+                        {suggestion.category}
+                      </span>
+                    </div>
                   </div>
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[hsl(73,31%,45%)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                 </button>
@@ -307,7 +346,7 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto pb-4">
-          <MessageList messages={messages} />
+          <MessageList messages={messages} onFollowUpClick={(text) => setInput(text)} />
           <div ref={messagesEndRef} />
         </div>
       )}
@@ -357,7 +396,7 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
       )}
 
       <form onSubmit={handleSubmit} className="pt-4 pb-4">
-        <div className="relative bg-card/40 border border-border/40 rounded-2xl transition-all duration-300 focus-within:border-[hsl(73,31%,45%)]/40 focus-within:bg-card/80 focus-within:shadow-lg focus-within:shadow-[hsl(73,31%,45%)]/5">
+        <div className="relative bg-card/50 border border-border/40 rounded-2xl transition-all duration-300 focus-within:border-[hsl(73,31%,45%)]/50 focus-within:bg-card/90 focus-within:shadow-xl focus-within:shadow-[hsl(73,31%,45%)]/8 backdrop-blur-sm">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -367,11 +406,11 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
                 handleSubmit(e)
               }
             }}
-            placeholder={isRecording ? 'Listening...' : 'Ask anything...'}
+            placeholder={isRecording ? 'Listening...' : 'Ask me anything — I\'ll research and explain it for you...'}
             disabled={isLoading}
             rows={1}
-            className={`w-full px-5 py-4 pr-36 bg-transparent border-none focus:outline-none focus:ring-0 resize-none text-foreground placeholder:text-muted-foreground/50 text-[15px] ${isRecording ? 'placeholder:text-red-400 placeholder:animate-pulse' : ''}`}
-            style={{ minHeight: '54px', maxHeight: '200px' }}
+            className={`w-full px-5 py-4 pr-36 bg-transparent border-none focus:outline-none focus:ring-0 resize-none text-foreground placeholder:text-muted-foreground/40 text-[15px] ${isRecording ? 'placeholder:text-red-400 placeholder:animate-pulse' : ''}`}
+            style={{ minHeight: '56px', maxHeight: '200px' }}
           />
           
           {/* Input action buttons */}

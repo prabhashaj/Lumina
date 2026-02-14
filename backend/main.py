@@ -16,6 +16,7 @@ import json
 import io
 import base64
 from loguru import logger
+from langchain_openai import ChatOpenAI
 
 from config.settings import settings
 from graph.orchestrator import ResearchOrchestrator
@@ -161,6 +162,97 @@ async def health_check():
             "max_images": settings.max_images_per_response
         }
     }
+
+
+# ─── Code AI Tutor ───────────────────────────────────────────────
+
+_code_ai_llm = None
+
+def _get_code_ai_llm():
+    """Lazy-init an LLM for the code tutor using same priority as teaching agents."""
+    global _code_ai_llm
+    if _code_ai_llm is None:
+        if settings.mistral_api_key:
+            _code_ai_llm = ChatOpenAI(
+                model=settings.mistral_model,
+                temperature=0.7,
+                api_key=settings.mistral_api_key,
+                base_url="https://api.mistral.ai/v1",
+            )
+        elif settings.groq_api_key:
+            _code_ai_llm = ChatOpenAI(
+                model=settings.groq_model,
+                temperature=0.7,
+                api_key=settings.groq_api_key,
+                base_url="https://api.groq.com/openai/v1",
+            )
+        else:
+            _code_ai_llm = ChatOpenAI(
+                model=settings.primary_llm_model,
+                temperature=0.7,
+                api_key=settings.openai_api_key,
+            )
+    return _code_ai_llm
+
+
+@app.post("/api/code-ai/chat")
+async def code_ai_chat(request: dict):
+    """
+    AI coding tutor chat endpoint.
+    Accepts: message, systemPrompt, code, language, questionTitle,
+             questionDescription, output, error, history
+    Returns: { response: str }
+    """
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg, AIMessage
+
+        llm = _get_code_ai_llm()
+
+        system_prompt = request.get("systemPrompt", "You are a helpful coding tutor.")
+        user_message = request.get("message", "")
+        code = request.get("code", "")
+        language = request.get("language", "python")
+        question_title = request.get("questionTitle", "")
+        question_desc = request.get("questionDescription", "")
+        output = request.get("output", "")
+        error = request.get("error", "")
+        history = request.get("history", [])
+
+        # Build context block
+        context_parts = []
+        if question_title:
+            context_parts.append(f"**Problem:** {question_title}")
+        if question_desc:
+            context_parts.append(f"**Description:** {question_desc}")
+        if code:
+            context_parts.append(f"**Student's {language} code:**\n```{language}\n{code}\n```")
+        if output:
+            context_parts.append(f"**Program output:**\n```\n{output}\n```")
+        if error:
+            context_parts.append(f"**Error:**\n```\n{error}\n```")
+
+        context_block = "\n\n".join(context_parts)
+
+        # Build messages list
+        messages = [SystemMessage(content=system_prompt)]
+
+        # Add history
+        for h in history[-6:]:
+            if h.get("role") == "user":
+                messages.append(HMsg(content=h["content"]))
+            elif h.get("role") == "assistant":
+                messages.append(AIMessage(content=h["content"]))
+
+        # Add current user message with context
+        full_user_message = f"{context_block}\n\n---\n\n{user_message}" if context_block else user_message
+        messages.append(HMsg(content=full_user_message))
+
+        result = await llm.ainvoke(messages)
+        return {"response": result.content}
+
+    except Exception as e:
+        logger.error(f"Code AI chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI chat error: {str(e)}")
 
 
 @app.post("/api/research", response_model=TeachingResponse)
@@ -422,10 +514,10 @@ async def text_to_speech(request: dict):
                     "text": text,
                     "model_id": settings.tts_model,
                     "voice_settings": {
-                        "stability": 0.65,
-                        "similarity_boost": 0.80,
-                        "style": 0.35,
-                        "use_speaker_boost": False
+                        "stability": 0.82,
+                        "similarity_boost": 0.88,
+                        "style": 0.08,
+                        "use_speaker_boost": True
                     }
                 }
             )
@@ -584,8 +676,6 @@ async def generate_topic_quiz(request: dict):
         if not orchestrator:
             raise HTTPException(status_code=503, detail="Service not initialized")
 
-        agent = orchestrator.teaching_agent
-
         quiz_prompt = f"""You are an expert exam question writer. Create a quiz for the topic: "{topic}" 
 (Chapter: {chapter}, Subject: {subject}).
 
@@ -610,18 +700,80 @@ Return ONLY valid JSON in this exact format:
   ]
 }}"""
 
-        llm_response = await agent._call_llm(quiz_prompt)
+        import re as re_mod
+        llm_response = None
+        last_error = None
 
-        import re
-        json_match = re.search(r'\{[\s\S]*\}', llm_response)
+        # Try multiple LLM providers for reliability
+        llm_candidates = []
+
+        # Priority 1: Teaching agent's LLM (Mistral/Groq/OpenAI)
+        if orchestrator.teaching_agent:
+            llm_candidates.append(("teaching_agent", orchestrator.teaching_agent.llm))
+
+        # Priority 2: Groq directly
+        if settings.groq_api_key:
+            llm_candidates.append(("groq", ChatOpenAI(
+                model=settings.groq_model,
+                temperature=0.7,
+                api_key=settings.groq_api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )))
+
+        # Priority 3: Mistral directly
+        if settings.mistral_api_key:
+            llm_candidates.append(("mistral", ChatOpenAI(
+                model=settings.mistral_model,
+                temperature=0.7,
+                api_key=settings.mistral_api_key,
+                base_url="https://api.mistral.ai/v1"
+            )))
+
+        # Priority 4: OpenAI directly
+        if settings.openai_api_key:
+            llm_candidates.append(("openai", ChatOpenAI(
+                model=settings.primary_llm_model,
+                temperature=0.7,
+                api_key=settings.openai_api_key
+            )))
+
+        for provider_name, llm in llm_candidates:
+            try:
+                logger.info(f"Trying quiz generation with: {provider_name}")
+                from langchain_core.messages import HumanMessage as HMsg
+                response = await llm.ainvoke([HMsg(content=quiz_prompt)])
+                llm_response = response.content
+                logger.info(f"Quiz LLM response from {provider_name}: {len(llm_response)} chars")
+                break
+            except Exception as llm_err:
+                last_error = llm_err
+                logger.warning(f"Quiz generation failed with {provider_name}: {str(llm_err)}")
+                continue
+
+        if not llm_response:
+            raise ValueError(f"All LLM providers failed for quiz generation. Last error: {last_error}")
+
+        json_match = re_mod.search(r'\{[\s\S]*\}', llm_response)
         if not json_match:
             raise ValueError("Could not parse quiz from LLM response")
 
         quiz_data = json.loads(json_match.group())
 
-        # Add IDs to questions
-        for i, q in enumerate(quiz_data.get("questions", [])):
+        # Validate quiz structure
+        questions = quiz_data.get("questions", [])
+        if not questions:
+            raise ValueError("No questions found in quiz response")
+
+        # Add IDs to questions and validate structure
+        for i, q in enumerate(questions):
             q["id"] = f"q_{i}"
+            # Ensure required fields exist
+            if "options" not in q or len(q.get("options", [])) < 2:
+                q["options"] = ["Option A", "Option B", "Option C", "Option D"]
+            if "correctIndex" not in q:
+                q["correctIndex"] = 0
+            if "explanation" not in q:
+                q["explanation"] = "See the topic content for detailed explanation."
 
         return quiz_data
 
@@ -633,11 +785,9 @@ Return ONLY valid JSON in this exact format:
 
 
 async def _analyze_image_with_vlm(image_url: str, question: str = "") -> str:
-    """Analyze an uploaded image with VLM"""
-    try:
-        if settings.replicate_api_token:
-            import replicate
-            prompt = f"""Describe this image in detail for educational purposes.
+    """Analyze an uploaded image with VLM (Groq, Mistral, OpenAI, or Replicate)"""
+
+    prompt_text = f"""Describe this image in detail for educational purposes.
 What do you see? Include:
 - Main subject/content
 - Key details, labels, or text visible
@@ -646,20 +796,102 @@ What do you see? Include:
 
 Be specific and thorough."""
 
+    errors = []
+
+    # Priority 1: Groq vision (fast, reliable)
+    if settings.groq_api_key:
+        try:
+            from langchain_core.messages import HumanMessage as HMsg
+
+            llm = ChatOpenAI(
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                temperature=0.3,
+                api_key=settings.groq_api_key,
+                base_url="https://api.groq.com/openai/v1",
+                max_tokens=1024,
+            )
+
+            message = HMsg(
+                content=[
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ]
+            )
+            result = await llm.ainvoke([message])
+            return result.content
+        except Exception as e:
+            errors.append(f"Groq VLM: {str(e)}")
+            logger.warning(f"Groq VLM failed, falling back to next provider: {str(e)}")
+
+    # Priority 2: Use Mistral's vision model (pixtral) via OpenAI-compatible API
+    if settings.mistral_api_key:
+        try:
+            from langchain_core.messages import HumanMessage as HMsg
+
+            llm = ChatOpenAI(
+                model="pixtral-12b-2409",
+                temperature=0.3,
+                api_key=settings.mistral_api_key,
+                base_url="https://api.mistral.ai/v1",
+                max_tokens=1024,
+            )
+
+            message = HMsg(
+                content=[
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ]
+            )
+            result = await llm.ainvoke([message])
+            return result.content
+        except Exception as e:
+            errors.append(f"Mistral VLM: {str(e)}")
+            logger.warning(f"Mistral VLM failed, falling back to next provider: {str(e)}")
+
+    # Priority 3: Use OpenAI GPT-4o-mini Vision
+    if settings.openai_api_key:
+        try:
+            from langchain_core.messages import HumanMessage as HMsg
+
+            llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0.3,
+                api_key=settings.openai_api_key,
+                max_tokens=1024,
+            )
+
+            message = HMsg(
+                content=[
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ]
+            )
+            result = await llm.ainvoke([message])
+            return result.content
+        except Exception as e:
+            errors.append(f"OpenAI VLM: {str(e)}")
+            logger.warning(f"OpenAI VLM failed: {str(e)}")
+
+    # Priority 4: Replicate LLaVA
+    if settings.replicate_api_token:
+        try:
+            import replicate
             output = replicate.run(
                 "yorickvp/llava-13b:b5f6212d032508382d61ff00469ddda3e32fd8a0e75dc39d8a4191bb742157fb",
                 input={
                     "image": image_url,
-                    "prompt": prompt,
+                    "prompt": prompt_text,
                     "max_tokens": 500
                 }
             )
             return "".join(output)
-        else:
-            return "Image uploaded successfully. VLM analysis requires a Replicate API token."
-    except Exception as e:
-        logger.error(f"VLM analysis error: {str(e)}")
-        return f"Image uploaded. VLM analysis unavailable: {str(e)}"
+        except Exception as e:
+            errors.append(f"Replicate VLM: {str(e)}")
+            logger.warning(f"Replicate VLM failed: {str(e)}")
+
+    error_detail = "; ".join(errors) if errors else "No vision API keys configured"
+    logger.error(f"All VLM providers failed: {error_detail}")
+    return f"Image uploaded but vision analysis failed. Errors: {error_detail}"
 
 
 # ── Personalized Learning Endpoints ──────────────────────────────
@@ -967,6 +1199,665 @@ Provide a comprehensive, personalized explanation."""
             "X-Accel-Buffering": "no"
         }
     )
+
+
+# ─── Video Lecture / Slide Generation ────────────────────────────
+
+from agents.slide_generator import SlideGeneratorAgent
+from agents.narration_agent import NarrationAgent
+
+_slide_agent: SlideGeneratorAgent | None = None
+_narration_agent: NarrationAgent | None = None
+
+
+def _get_slide_agent() -> SlideGeneratorAgent:
+    global _slide_agent
+    if _slide_agent is None:
+        _slide_agent = SlideGeneratorAgent()
+    return _slide_agent
+
+
+def _get_narration_agent() -> NarrationAgent:
+    global _narration_agent
+    if _narration_agent is None:
+        _narration_agent = NarrationAgent()
+    return _narration_agent
+
+
+async def _resolve_slide_images(slides: list, topic: str):
+    """Fetch a relevant image for EACH slide using its unique image_query via Tavily."""
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=settings.tavily_api_key)
+
+        # Collect per-slide queries, dedup to save API calls
+        query_map: dict[str, list[int]] = {}  # query -> [slide indices]
+        for i, s in enumerate(slides):
+            q = (s.get("image_query") or "").strip()
+            if not q:
+                q = f"{topic} {s.get('title', '')}".strip()
+            key = q.lower()
+            if key not in query_map:
+                query_map[key] = []
+            query_map[key].append(i)
+
+        # Cap at 8 unique queries to balance relevance vs API usage
+        unique_queries = list(query_map.items())[:8]
+        global_fallback: list[str] = []
+
+        for query_key, slide_indices in unique_queries:
+            try:
+                # Use the original-case query from the first slide in the group
+                first_idx = slide_indices[0]
+                original_query = (slides[first_idx].get("image_query") or "").strip()
+                if not original_query:
+                    original_query = f"{topic} {slides[first_idx].get('title', '')}".strip()
+
+                resp = client.search(
+                    query=original_query,
+                    include_images=True,
+                    max_results=3,
+                    search_depth="basic",
+                )
+                images = resp.get("images", [])
+                if images:
+                    # Assign each slide in this group its own image (round-robin if fewer images)
+                    for j, idx in enumerate(slide_indices):
+                        slides[idx]["image_url"] = images[j % len(images)]
+                    global_fallback.extend(images)
+                else:
+                    # Mark for fallback
+                    for idx in slide_indices:
+                        slides[idx]["_needs_fallback"] = True
+            except Exception:
+                for idx in slide_indices:
+                    slides[idx]["_needs_fallback"] = True
+                continue
+
+        # Fill any slides that didn't get an image with fallback images
+        if global_fallback:
+            for i, slide in enumerate(slides):
+                if slide.pop("_needs_fallback", False) or not slide.get("image_url"):
+                    slide["image_url"] = global_fallback[i % len(global_fallback)]
+
+        resolved_count = sum(1 for s in slides if s.get("image_url"))
+        logger.info(f"Resolved images for {resolved_count}/{len(slides)} slides ({len(unique_queries)} queries)")
+    except Exception as e:
+        logger.warning(f"Slide image resolution failed: {e}")
+
+
+@app.post("/api/video-lecture/generate")
+async def generate_video_lecture(request: dict):
+    """
+    Generate a full slide deck with narration audio for a topic.
+    Body: { "topic": str, "num_slides": int (opt), "difficulty": str (opt) }
+    Returns the full presentation JSON including per-slide audio.
+    """
+    try:
+        topic = request.get("topic", "").strip()
+        if not topic:
+            raise HTTPException(status_code=400, detail="No topic provided")
+
+        num_slides = request.get("num_slides", 10)
+        difficulty = request.get("difficulty", "intermediate")
+
+        slide_agent = _get_slide_agent()
+        narration_agent = _get_narration_agent()
+
+        # 1. Generate slides
+        presentation = await slide_agent.generate_slides(topic, num_slides, difficulty)
+
+        # 1b. Resolve real image URLs for each slide
+        await _resolve_slide_images(presentation["slides"], topic)
+
+        # 2. Generate narration scripts
+        narration_scripts = await slide_agent.generate_narration_script(presentation["slides"])
+
+        # 3. Generate audio for each slide
+        narrations = await narration_agent.generate_all_narrations(narration_scripts)
+
+        # 4. Merge audio into slides
+        narr_map = {n["slide_number"]: n for n in narrations}
+        for slide in presentation["slides"]:
+            n = narr_map.get(slide["slide_number"], {})
+            slide["audio_base64"] = n.get("audio_base64", "")
+            slide["use_browser_tts"] = n.get("use_browser_tts", True)
+            slide["narration_text"] = n.get("text", slide.get("speaker_notes", ""))
+            slide["duration_estimate"] = n.get("duration_estimate", 5)
+
+        return presentation
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video lecture generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/video-lecture/generate/stream")
+async def generate_video_lecture_stream(request: dict):
+    """
+    Stream slide generation progress so the UI can show slides
+    as they are being generated.
+    """
+    topic = request.get("topic", "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="No topic provided")
+
+    num_slides = request.get("num_slides", 10)
+    difficulty = request.get("difficulty", "intermediate")
+
+    async def event_stream():
+        try:
+            slide_agent = _get_slide_agent()
+            narration_agent = _get_narration_agent()
+
+            yield f"data: {json.dumps({'type': 'status', 'data': 'Generating slides...'})}\n\n"
+
+            presentation = await slide_agent.generate_slides(topic, num_slides, difficulty)
+
+            # Resolve real image URLs
+            yield f"data: {json.dumps({'type': 'status', 'data': 'Fetching images...'})}\n\n"
+            await _resolve_slide_images(presentation["slides"], topic)
+
+            yield f"data: {json.dumps({'type': 'metadata', 'data': {'title': presentation['title'], 'subtitle': presentation['subtitle'], 'total_slides': presentation['total_slides'], 'estimated_duration_minutes': presentation['estimated_duration_minutes']}})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'status', 'data': 'Generating narration...'})}\n\n"
+
+            narration_scripts = await slide_agent.generate_narration_script(presentation["slides"])
+
+            # Stream each slide with its audio
+            for i, slide in enumerate(presentation["slides"]):
+                script = narration_scripts[i] if i < len(narration_scripts) else {"narration": ""}
+                audio_data = await narration_agent.generate_slide_audio(script.get("narration", ""))
+
+                slide["audio_base64"] = audio_data.get("audio_base64", "")
+                slide["use_browser_tts"] = audio_data.get("use_browser_tts", True)
+                slide["narration_text"] = audio_data.get("text", slide.get("speaker_notes", ""))
+                slide["duration_estimate"] = audio_data.get("duration_estimate", 5)
+
+                yield f"data: {json.dumps({'type': 'slide', 'data': slide})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Video lecture streaming error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/video-lecture/narrate-slide")
+async def narrate_single_slide(request: dict):
+    """
+    Generate audio narration for a single slide on demand.
+    Body: { "text": str }
+    """
+    try:
+        text = request.get("text", "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="No text provided")
+
+        narration_agent = _get_narration_agent()
+        result = await narration_agent.generate_slide_audio(text)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Single slide narration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────── AI Doubt Solver ───────────────────────────
+
+@app.post("/api/doubt-solver/solve")
+async def doubt_solver(file: UploadFile = File(...), question: str = Form("")):
+    """
+    Upload an image of a textbook page, handwritten notes, or problem set.
+    The AI OCRs it and explains / solves / generates practice from it.
+    """
+    try:
+        logger.info(f"Doubt solver upload: {file.filename}")
+        content = await file.read()
+
+        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        if file.content_type not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"Unsupported image type: {file.content_type}")
+
+        b64_data = base64.b64encode(content).decode("utf-8")
+        data_url = f"data:{file.content_type};base64,{b64_data}"
+
+        # Step 1 – VLM extracts text / diagram description
+        ocr_description = await _analyze_image_with_vlm(
+            data_url,
+            question or "Extract all text, equations, diagrams, and problems visible in this image. Be very thorough."
+        )
+
+        # Step 2 – LLM explains / solves
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
+
+        llm = _get_code_ai_llm()
+
+        system = SystemMessage(content="""You are Lumina Doubt Solver — an expert tutor for students.
+You receive OCR-extracted content from a student's uploaded image (textbook page, notes, problem set, etc.) plus an optional question.
+
+Your job:
+1. **Identify** what the student is looking at (subject, topic, type of content).
+2. **Explain** the core concepts shown clearly and simply.
+3. **Solve** any problems/equations step-by-step with clear reasoning.
+4. **Practice** — generate 2-3 similar practice problems with answers.
+
+Rules:
+- Use LaTeX for math: inline $...$ and display $$...$$
+- Use markdown formatting with headers, bullet points, bold, etc.
+- Be encouraging and supportive like a great teacher.
+- If the image contains multiple problems, address each one.
+- If unsure about OCR accuracy, note assumptions.
+""")
+
+        user_msg = f"""## Extracted content from student's uploaded image:
+
+{ocr_description}
+
+## Student's question:
+{question if question else "Please explain this and solve any problems shown."}"""
+
+        result = await llm.ainvoke([system, HMsg(content=user_msg)])
+
+        return {
+            "filename": file.filename,
+            "preview_url": "",
+            "ocr_text": ocr_description,
+            "solution": result.content,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Doubt solver error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/doubt-solver/chat")
+async def doubt_solver_chat(request: dict):
+    """
+    Chat-based doubt solver with conversation memory.
+    Supports follow-up questions and optional image uploads.
+    Body: { "message": str, "conversation_history": [{"role":str,"content":str}], "image_base64"?: str, "image_type"?: str }
+    """
+    try:
+        message = request.get("message", "").strip()
+        history = request.get("conversation_history", [])
+        image_b64 = request.get("image_base64", "")
+        image_type = request.get("image_type", "image/png")
+
+        if not message and not image_b64:
+            raise HTTPException(status_code=400, detail="No message or image provided")
+
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
+
+        llm = _get_code_ai_llm()
+
+        # If image is provided, run VLM first
+        image_context = ""
+        if image_b64:
+            data_url = f"data:{image_type};base64,{image_b64}"
+            image_context = await _analyze_image_with_vlm(
+                data_url,
+                message or "Extract all text, equations, diagrams, and problems visible in this image. Be very thorough."
+            )
+
+        system = SystemMessage(content="""You are Lumina Doubt Solver — an expert tutor who helps students understand concepts and solve problems through conversation.
+
+Your capabilities:
+1. **Explain** concepts clearly with examples and analogies.
+2. **Solve** problems step-by-step with clear reasoning.
+3. **Follow up** on previous discussion with deeper insights.
+4. **Practice** — suggest practice problems when appropriate.
+
+Rules:
+- Use LaTeX for math: inline $...$ and display $$...$$ 
+- Use markdown formatting with headers, bullet points, bold, etc.
+- Be encouraging and supportive like a great teacher.
+- Reference previous conversation context when answering follow-ups.
+- If an image was analyzed, incorporate that context into your response.
+- Keep responses focused and well-structured.
+""")
+
+        # Build messages from history
+        chat_messages = [system]
+        for msg in history[-20:]:  # Keep last 20 messages for context
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "assistant":
+                from langchain_core.messages import AIMessage
+                chat_messages.append(AIMessage(content=content))
+            else:
+                chat_messages.append(HMsg(content=content))
+
+        # Build current user message
+        user_msg_parts = []
+        if image_context:
+            user_msg_parts.append(f"[Image content extracted via OCR/VLM]:\n{image_context}")
+        if message:
+            user_msg_parts.append(message)
+
+        chat_messages.append(HMsg(content="\n\n".join(user_msg_parts) if user_msg_parts else "Please help me understand this."))
+
+        result = await llm.ainvoke(chat_messages)
+
+        return {
+            "response": result.content,
+            "image_context": image_context if image_context else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Doubt solver chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────── Guide Chatbot ─────────────────────────────
+
+@app.post("/api/guide/chat")
+async def guide_chat(request: dict):
+    """
+    Context-aware guide chatbot for Exam Prep, Personalized Learning, and Video Lectures.
+    Body: { "message": str, "mode": str, "context": str, "conversation_history": [{"role":str,"content":str}] }
+    """
+    try:
+        message = request.get("message", "").strip()
+        mode = request.get("mode", "general")
+        context = request.get("context", "")
+        history = request.get("conversation_history", [])
+
+        if not message:
+            raise HTTPException(status_code=400, detail="No message provided")
+
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg, AIMessage
+
+        llm = _get_code_ai_llm()
+
+        mode_prompts = {
+            "exam-prep": """You are Lumina Study Guide — an AI tutor embedded in the Exam Prep section.
+The student is studying for exams and has a roadmap of topics. Help them:
+- Understand difficult concepts from their study topics
+- Explain formulas, theorems, and definitions
+- Create quick practice questions on the fly
+- Suggest study strategies and memory techniques
+- Answer any questions about the subjects they're studying""",
+
+            "personalized": """You are Lumina Learning Guide — an AI tutor embedded in the Personalized Learning section.
+The student has a personalized learning plan. Help them:
+- Dive deeper into topics from their learning plan
+- Explain concepts at their skill level
+- Suggest additional resources and exercises
+- Help them overcome specific learning challenges
+- Track and discuss their learning progress""",
+
+            "video-lecture": """You are Lumina Lecture Assistant — an AI tutor embedded in the Video Lecture section.
+The student is watching AI-generated video lectures. Help them:
+- Clarify concepts presented in the slides
+- Answer questions about the lecture content
+- Provide additional examples and explanations
+- Help them take effective notes
+- Connect lecture content to broader topics""",
+        }
+
+        system_prompt = mode_prompts.get(mode, """You are Lumina Guide — a helpful AI learning assistant.
+Help the student with any questions about their studies.""")
+
+        if context:
+            system_prompt += f"\n\nCurrent context the student is working with:\n{context}"
+
+        system_prompt += """
+
+Rules:
+- Use LaTeX for math: inline $...$ and display $$...$$
+- Use markdown formatting for structure
+- Be concise but thorough — respect the student's time
+- Be encouraging and supportive
+- Reference previous conversation when relevant
+"""
+
+        system = SystemMessage(content=system_prompt)
+
+        chat_messages = [system]
+        for msg in history[-15:]:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "assistant":
+                chat_messages.append(AIMessage(content=content))
+            else:
+                chat_messages.append(HMsg(content=content))
+
+        chat_messages.append(HMsg(content=message))
+
+        result = await llm.ainvoke(chat_messages)
+
+        return {"response": result.content}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Guide chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────── Flashcard Generation ──────────────────────────
+
+@app.post("/api/flashcards/generate")
+async def generate_flashcards(request: dict):
+    """
+    Generate flashcards from a topic or pasted content.
+    Body: { "topic": str, "content"?: str, "count"?: int }
+    Returns: { cards: [{ front, back, difficulty }] }
+    """
+    try:
+        topic = request.get("topic", "").strip()
+        content = request.get("content", "").strip()
+        count = min(request.get("count", 10), 20)
+
+        if not topic and not content:
+            raise HTTPException(status_code=400, detail="Provide a topic or content")
+
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
+        llm = _get_code_ai_llm()
+
+        system = SystemMessage(content=f"""You are a flashcard generator for spaced-repetition learning.
+Generate exactly {count} flashcards as a JSON array.
+
+Each flashcard must have:
+- "front": The question/prompt (concise, clear)
+- "back": The answer/explanation (thorough but focused)
+- "difficulty": 1-5 (1=easy recall, 5=very hard)
+
+Rules:
+- Cover the most important concepts first.
+- Mix question types: definitions, fill-in-blank, true/false, short-answer, application.
+- Use LaTeX ($...$) for math/science formulas.
+- Return ONLY a valid JSON array, no other text.
+""")
+
+        user_content = f"Topic: {topic}" if topic else ""
+        if content:
+            user_content += f"\n\nSource content to create flashcards from:\n{content[:5000]}"
+
+        result = await llm.ainvoke([system, HMsg(content=user_content)])
+        raw = result.content.strip()
+
+        # Strip markdown code blocks if present (```json ... ``` or ``` ... ```)
+        if raw.startswith("```"):
+            # Remove opening ``` (optionally with language tag) and closing ```
+            raw = re.sub(r'^```(?:json)?\s*\n?', '', raw)
+            raw = re.sub(r'\n?```\s*$', '', raw)
+            raw = raw.strip()
+
+        # Parse JSON — the LLM might return a bare array [...] or an object {"cards": [...]}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            # Fallback: try the safe parser
+            parsed = _safe_json_loads(raw)
+
+        if isinstance(parsed, list):
+            cards = parsed
+        elif isinstance(parsed, dict):
+            cards = parsed.get("cards", parsed.get("flashcards", []))
+            if not isinstance(cards, list):
+                cards = []
+        else:
+            cards = []
+
+        return {"cards": cards, "topic": topic}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Flashcard generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────── Code Playground ───────────────────────────────
+
+@app.post("/api/code-playground/run")
+async def run_code_playground(request: dict):
+    """
+    Execute code in a sandboxed environment (Python only for safety).
+    Body: { "code": str, "language": str, "stdin"?: str }
+    Returns: { stdout, stderr, exitCode, executionTime }
+    """
+    import subprocess
+    import tempfile
+    import time
+
+    try:
+        code = request.get("code", "").strip()
+        language = request.get("language", "python").lower()
+        stdin_data = request.get("stdin", "")
+
+        if not code:
+            raise HTTPException(status_code=400, detail="No code provided")
+
+        if language not in ("python", "javascript", "js"):
+            raise HTTPException(status_code=400, detail=f"Language '{language}' execution not supported. Use 'python' or 'javascript'.")
+
+        start_time = time.time()
+
+        if language == "python":
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(code)
+                f.flush()
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, f.name],
+                        capture_output=True, text=True,
+                        timeout=10, input=stdin_data,
+                    )
+                    elapsed = round((time.time() - start_time) * 1000)
+                    return {
+                        "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
+                        "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
+                        "exitCode": proc.returncode,
+                        "executionTime": elapsed,
+                    }
+                finally:
+                    import os
+                    os.unlink(f.name)
+
+        elif language in ("javascript", "js"):
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                f.write(code)
+                f.flush()
+                try:
+                    proc = subprocess.run(
+                        ["node", f.name],
+                        capture_output=True, text=True,
+                        timeout=10, input=stdin_data,
+                    )
+                    elapsed = round((time.time() - start_time) * 1000)
+                    return {
+                        "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
+                        "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
+                        "exitCode": proc.returncode,
+                        "executionTime": elapsed,
+                    }
+                finally:
+                    import os
+                    os.unlink(f.name)
+
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": "Execution timed out (10s limit)", "exitCode": 1, "executionTime": 10000}
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail=f"Runtime for '{language}' not found on server")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Code execution error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/code-playground/explain")
+async def explain_code(request: dict):
+    """
+    AI explains code step-by-step, debugs errors, or generates exercises.
+    Body: { "code": str, "language": str, "action": "explain"|"debug"|"exercise"|"optimize", "error"?: str }
+    """
+    try:
+        code = request.get("code", "").strip()
+        language = request.get("language", "python")
+        action = request.get("action", "explain")
+        error = request.get("error", "")
+
+        if not code:
+            raise HTTPException(status_code=400, detail="No code provided")
+
+        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
+        llm = _get_code_ai_llm()
+
+        prompts = {
+            "explain": f"""You are a coding tutor. Explain the following {language} code step-by-step.
+- Walk through each line/block and explain what it does.
+- Highlight key concepts, patterns, and potential gotchas.
+- Rate the code complexity (beginner/intermediate/advanced).
+- Use markdown with syntax-highlighted code blocks.""",
+            "debug": f"""You are a debugging expert. The student's {language} code has an error.
+- Identify the bug(s) and explain why they occur.
+- Show the corrected code with explanations.
+- Suggest how to avoid similar bugs in the future.
+Error message: {error}""",
+            "exercise": f"""You are a coding exercise generator. Based on this {language} code, create:
+1. Three practice exercises of increasing difficulty (easy, medium, hard).
+2. Each with: title, description, starter code, expected output, hints.
+3. Return as structured markdown with clear sections.""",
+            "optimize": f"""You are a code optimization expert. Review this {language} code and:
+1. Identify performance issues or anti-patterns.
+2. Show the optimized version with explanations.
+3. Compare time/space complexity before and after.
+4. Suggest best practices.""",
+        }
+
+        system = SystemMessage(content=prompts.get(action, prompts["explain"]))
+        user_msg = f"```{language}\n{code}\n```"
+
+        result = await llm.ainvoke([system, HMsg(content=user_msg)])
+        return {"result": result.content, "action": action}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Code explain error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

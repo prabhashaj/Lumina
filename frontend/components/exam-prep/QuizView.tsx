@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { QuizQuestion } from '@/lib/types'
 import { CheckCircle2, XCircle, ArrowRight, Trophy, RotateCcw, Sparkles } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface QuizViewProps {
   topicTitle: string
@@ -109,19 +111,19 @@ export default function QuizView({ topicTitle, questions, onComplete, onRetry }:
                     ) : (
                       <XCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
                     )}
-                    <p className="text-sm font-medium text-foreground leading-relaxed">{q.question}</p>
+                    <div className="text-sm font-medium text-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <span>{children}</span> }}>{q.question}</ReactMarkdown></div>
                   </div>
                   {!wasCorrect && (
                     <div className="ml-6 space-y-1">
-                      <p className="text-xs text-red-400/80">
-                        Your answer: {q.options[userAns ?? 0]}
-                      </p>
-                      <p className="text-xs text-emerald-400">
-                        Correct: {q.options[q.correctIndex]}
-                      </p>
+                      <div className="text-xs text-red-400/80">
+                        Your answer: <ReactMarkdown remarkPlugins={[remarkGfm]} className="inline" components={{ p: ({ children }) => <span>{children}</span> }}>{q.options[userAns ?? 0]}</ReactMarkdown>
+                      </div>
+                      <div className="text-xs text-emerald-400">
+                        Correct: <ReactMarkdown remarkPlugins={[remarkGfm]} className="inline" components={{ p: ({ children }) => <span>{children}</span> }}>{q.options[q.correctIndex]}</ReactMarkdown>
+                      </div>
                     </div>
                   )}
-                  <p className="ml-6 text-xs text-muted-foreground/70 mt-1.5 leading-relaxed">{q.explanation}</p>
+                  <div className="ml-6 text-xs text-muted-foreground/70 mt-1.5 leading-relaxed prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <span>{children}</span> }}>{q.explanation}</ReactMarkdown></div>
                 </div>
               )
             })}
@@ -167,7 +169,7 @@ export default function QuizView({ topicTitle, questions, onComplete, onRetry }:
 
       {/* Question card */}
       <div className="bg-card/60 rounded-2xl border border-border/30 p-6 shadow-lg shadow-black/5 animate-fadeInScale" key={currentQ}>
-        <h3 className="text-base font-semibold text-foreground mb-6 leading-relaxed">{question.question}</h3>
+        <div className="text-base font-semibold text-foreground mb-6 leading-relaxed prose dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <span>{children}</span> }}>{question.question}</ReactMarkdown></div>
 
         <div className="space-y-2.5">
           {question.options.map((option, optIdx) => {
@@ -205,7 +207,7 @@ export default function QuizView({ topicTitle, questions, onComplete, onRetry }:
                 >
                   {String.fromCharCode(65 + optIdx)}
                 </span>
-                <span className="text-sm text-foreground flex-1">{option}</span>
+                <span className="text-sm text-foreground flex-1 prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} className="inline" components={{ p: ({ children }) => <span>{children}</span> }}>{option}</ReactMarkdown></span>
                 {isAnswered && optIdx === question.correctIndex && (
                   <CheckCircle2 className="w-5 h-5 text-emerald-500 ml-auto flex-shrink-0 animate-fadeInScale" />
                 )}
@@ -226,7 +228,7 @@ export default function QuizView({ topicTitle, questions, onComplete, onRetry }:
                 : 'bg-amber-500/[0.04] border-amber-500/15'
             }`}
           >
-            <p className="text-sm text-foreground/75 leading-relaxed">{question.explanation}</p>
+            <div className="text-sm text-foreground/75 leading-relaxed prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <span>{children}</span> }}>{question.explanation}</ReactMarkdown></div>
           </div>
         )}
 
