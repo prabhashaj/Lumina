@@ -97,12 +97,20 @@ def _safe_json_loads(raw: str) -> dict:
 
 
 # Initialize logger
-logger.add(
-    settings.log_file,
-    rotation="500 MB",
-    retention="10 days",
-    level=settings.log_level
-)
+import os as _os
+_log_dir = _os.path.dirname(settings.log_file)
+if _log_dir:
+    _os.makedirs(_log_dir, exist_ok=True)
+try:
+    logger.add(
+        settings.log_file,
+        rotation="500 MB",
+        retention="10 days",
+        level=settings.log_level
+    )
+except Exception:
+    # On read-only filesystems (e.g. Render free tier), skip file logging
+    logger.warning("Could not set up file logging, using stdout only")
 
 # Global orchestrator instance
 orchestrator = None
@@ -131,9 +139,10 @@ app = FastAPI(
 )
 
 # Configure CORS
+_cors_origins = settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

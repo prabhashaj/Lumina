@@ -1,7 +1,9 @@
 """
 Configuration management for the AI Research Teaching Agent
 """
+import json
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List
 from functools import lru_cache
 
@@ -13,7 +15,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     groq_api_key: str = ""
     mistral_api_key: str = ""
-    tavily_api_key: str
+    tavily_api_key: str = ""
     replicate_api_token: str = ""
     use_groq: bool = False
     elevenlabs_api_key: str = ""
@@ -55,6 +57,19 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_file: str = "./logs/app.log"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
     
     class Config:
         env_file = ".env"
