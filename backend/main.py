@@ -36,6 +36,8 @@ def _safe_json_loads(raw: str) -> dict:
 
     # Step 2: Clean common LLM JSON issues
     cleaned = raw
+    # Remove control characters except \n \r \t (fixes "Invalid control character" errors)
+    cleaned = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', cleaned)
     # Remove trailing commas before } or ]
     cleaned = _re.sub(r',\s*([}\]])', r'\1', cleaned)
     # Fix invalid escape sequences

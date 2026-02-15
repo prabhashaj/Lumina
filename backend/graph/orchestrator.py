@@ -2,7 +2,8 @@
 LangGraph Orchestrator - Coordinates all agents in a workflow
 """
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 from loguru import logger
 
@@ -13,9 +14,25 @@ from agents.image_understanding import ImageUnderstandingAgent
 from agents.teaching_synthesis import TeachingSynthesisAgent
 from shared.schemas.models import (
     ResearchRequest, TeachingResponse, AgentState,
-    SearchResult, Source, ImageData, SourceType
+    SearchResult, Source, ImageData, SourceType, IntentAnalysis
 )
 from config.settings import settings
+
+
+# TypedDict schema for LangGraph StateGraph (LangGraph requires TypedDict, not Pydantic)
+class GraphState(TypedDict, total=False):
+    original_question: str
+    intent: Optional[IntentAnalysis]
+    search_query: Optional[str]
+    search_results: List[SearchResult]
+    extracted_content: List[str]
+    images: List[ImageData]
+    teaching_content: Optional[str]
+    sources: List[Source]
+    retries: int
+    quality_score: float
+    errors: List[str]
+    metadata: Dict[str, Any]
 
 
 class ResearchOrchestrator:
@@ -34,8 +51,8 @@ class ResearchOrchestrator:
         
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow"""
-        # Use the shared AgentState Pydantic model as the StateGraph schema
-        workflow = StateGraph(AgentState)
+        # Use TypedDict-based GraphState for LangGraph compatibility
+        workflow = StateGraph(GraphState)
         
         # Add nodes (agents)
         workflow.add_node("classify_intent", self.classify_intent_node)
@@ -83,11 +100,21 @@ class ResearchOrchestrator:
         
         logger.info(f"Starting research workflow for: {request.question}")
         
-        # Initialize state
-        initial_state = AgentState(
-            original_question=request.question,
-            metadata={"start_time": start_time}
-        )
+        # Initialize state as dict (LangGraph StateGraph requires dict input)
+        initial_state = {
+            "original_question": request.question,
+            "intent": None,
+            "search_query": None,
+            "search_results": [],
+            "extracted_content": [],
+            "images": [],
+            "teaching_content": None,
+            "sources": [],
+            "retries": 0,
+            "quality_score": 0.0,
+            "errors": [],
+            "metadata": {"start_time": start_time}
+        }
         
         # Run the graph
         try:
