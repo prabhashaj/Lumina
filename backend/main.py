@@ -122,8 +122,12 @@ async def lifespan(app: FastAPI):
     global orchestrator
     
     logger.info("Starting AI Research Teaching Agent...")
-    orchestrator = ResearchOrchestrator()
-    logger.info("Orchestrator initialized")
+    try:
+        orchestrator = ResearchOrchestrator()
+        logger.info("Orchestrator initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize orchestrator: {e}")
+        orchestrator = None
     
     yield
     

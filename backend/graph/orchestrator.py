@@ -46,12 +46,11 @@ class ResearchOrchestrator:
         workflow.add_node("synthesize_teaching", self.synthesize_teaching_node)
         workflow.add_node("assess_quality", self.assess_quality_node)
         
-        # Define the flow with parallelization
+        # Define the flow (sequential pipeline)
         workflow.add_edge("classify_intent", "generate_queries")
         workflow.add_edge("generate_queries", "search_web")
         workflow.add_edge("search_web", "extract_content")
-        workflow.add_edge("search_web", "process_images")  # Parallel with extract_content
-        workflow.add_edge("extract_content", "synthesize_teaching")
+        workflow.add_edge("extract_content", "process_images")
         workflow.add_edge("process_images", "synthesize_teaching")
         workflow.add_edge("synthesize_teaching", "assess_quality")
         
