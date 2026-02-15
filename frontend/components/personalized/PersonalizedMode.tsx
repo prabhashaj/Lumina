@@ -250,14 +250,8 @@ export default function PersonalizedMode() {
   if (view === 'assessing') {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 relative">
-        <div className="orb orb-primary w-[200px] h-[200px] top-[20%] right-[15%] animate-float" />
-        <div className="relative animate-fadeIn">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(73,31%,45%)] to-[hsl(73,40%,38%)] flex items-center justify-center shadow-xl shadow-[hsl(73,31%,45%)]/20">
-            <Loader2 className="w-7 h-7 text-white animate-spin" />
-          </div>
-          <div className="absolute -inset-3 rounded-[28px] bg-[hsl(73,31%,45%)]/8 animate-pulse-glow" />
-        </div>
-        <div className="text-center animate-fadeIn" style={{ animationDelay: '100ms' }}>
+        <Loader2 className="w-10 h-10 text-[hsl(73,31%,50%)] animate-spin" />
+        <div className="text-center animate-fadeIn">
           <p className="text-foreground/80 font-medium text-sm">Creating your assessment...</p>
           <p className="text-xs text-muted-foreground mt-1">Preparing questions to gauge your knowledge</p>
         </div>
@@ -269,14 +263,8 @@ export default function PersonalizedMode() {
   if (view === 'analyzing') {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 relative">
-        <div className="orb orb-primary w-[200px] h-[200px] bottom-[20%] left-[10%] animate-float" />
-        <div className="relative animate-fadeIn">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(73,31%,45%)] to-[hsl(73,40%,38%)] flex items-center justify-center shadow-xl shadow-[hsl(73,31%,45%)]/20">
-            <Brain className="w-7 h-7 text-white animate-pulse" />
-          </div>
-          <div className="absolute -inset-3 rounded-[28px] bg-[hsl(73,31%,45%)]/8 animate-pulse-glow" />
-        </div>
-        <div className="text-center animate-fadeIn" style={{ animationDelay: '100ms' }}>
+        <Brain className="w-10 h-10 text-[hsl(73,31%,50%)] animate-pulse" />
+        <div className="text-center animate-fadeIn">
           <p className="text-foreground/80 font-medium text-sm">Analyzing your knowledge profile...</p>
           <p className="text-xs text-muted-foreground mt-1">Building a personalized learning plan just for you</p>
         </div>
@@ -288,43 +276,38 @@ export default function PersonalizedMode() {
   return (
     <>
     <div className="flex-1 overflow-y-auto relative">
-      {/* Ambient orbs */}
-      <div className="orb orb-primary w-[250px] h-[250px] top-[5%] right-[10%] animate-float" />
-      <div className="orb orb-secondary w-[180px] h-[180px] bottom-[15%] left-[5%] animate-float" style={{ animationDelay: '1.5s' }} />
-
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 relative z-10">
-        {/* Hero */}
-        <div className="text-center mb-10 animate-fadeIn">
-          <div className="relative inline-block mb-5">
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[hsl(73,31%,45%)] to-[hsl(73,40%,38%)] flex items-center justify-center shadow-xl shadow-[hsl(73,31%,45%)]/20 animate-float">
-              <User className="w-9 h-9 text-white" />
-            </div>
-            <div className="absolute -inset-3 rounded-[28px] bg-[hsl(73,31%,45%)]/8 animate-pulse-glow" />
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 relative z-10">
+        {/* Hero — text only, no icon */}
+        <div className="text-center mb-8 animate-fadeIn">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[hsl(73,31%,45%)]/10 border border-[hsl(73,31%,45%)]/20 text-[11px] font-semibold text-[hsl(73,31%,55%)] uppercase tracking-widest mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-[hsl(73,31%,50%)] animate-pulse" />
+            Adaptive AI
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-foreground tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-bold text-foreground tracking-tight leading-tight">
             Personalized <span className="text-gradient">Learning</span>
           </h1>
-          <p className="text-muted-foreground mt-3 max-w-md mx-auto leading-relaxed">
-            We assess your knowledge, identify gaps, and create a learning journey tailored to your level and style
+          <p className="text-muted-foreground mt-3 max-w-md mx-auto leading-relaxed text-sm">
+            We assess your knowledge, identify gaps, and create a learning journey tailored to your level and style.
           </p>
         </div>
 
-        {/* Feature pills */}
-        <div className="flex items-center justify-center gap-2 mb-8 flex-wrap animate-fadeIn" style={{ animationDelay: '150ms' }}>
+        {/* How it works — 3 steps */}
+        <div className="grid grid-cols-3 gap-3 mb-8 animate-fadeIn" style={{ animationDelay: '100ms' }}>
           {[
-            { icon: '🎯', label: 'Adaptive Assessment' },
-            { icon: '🧠', label: 'Knowledge Profiling' },
-            { icon: '✨', label: 'Style-Matched Content' },
-            { icon: '📈', label: 'Progress Tracking' },
-          ].map((f) => (
-            <span key={f.label} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card/60 border border-border/40 text-[11px] text-muted-foreground">
-              <span>{f.icon}</span> {f.label}
-            </span>
+            { step: '1', label: 'Take Assessment', desc: 'Quick diagnostic quiz' },
+            { step: '2', label: 'Get Your Profile', desc: 'AI analyzes strengths' },
+            { step: '3', label: 'Start Learning', desc: 'Personalized content' },
+          ].map((s) => (
+            <div key={s.step} className="text-center p-3 rounded-xl bg-card/30 border border-border/15">
+              <div className="w-7 h-7 rounded-lg bg-[hsl(73,31%,45%)]/15 text-[hsl(73,31%,55%)] text-xs font-bold flex items-center justify-center mx-auto mb-2">{s.step}</div>
+              <p className="text-xs font-semibold text-foreground">{s.label}</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">{s.desc}</p>
+            </div>
           ))}
         </div>
 
         {/* Subject input */}
-        <div className="bg-card/60 rounded-2xl border border-border/40 p-6 mb-8 animate-fadeIn shadow-lg shadow-black/5" style={{ animationDelay: '200ms' }}>
+        <div className="bg-card/60 rounded-2xl border border-border/40 p-6 mb-6 animate-fadeIn shadow-lg shadow-black/5" style={{ animationDelay: '200ms' }}>
           <label className="text-sm font-semibold text-foreground mb-3 block">
             What topic would you like to learn?
           </label>
@@ -368,7 +351,7 @@ export default function PersonalizedMode() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-500/10 rounded-2xl px-6 py-6 border border-red-500/30 mb-6 animate-fadeIn">
+          <div className="bg-red-500/10 rounded-2xl px-6 py-5 border border-red-500/30 mb-6 animate-fadeIn">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
@@ -394,39 +377,25 @@ export default function PersonalizedMode() {
                     className="flex items-center gap-4 bg-card/50 rounded-2xl border border-border/30 p-4 hover:bg-card hover:border-[hsl(73,31%,45%)]/20 hover:shadow-lg hover:shadow-black/5 transition-all duration-300 cursor-pointer group"
                     onClick={() => handleResumeSession(s)}
                   >
-                    <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[hsl(73,31%,45%)]/15 to-[hsl(73,31%,45%)]/5 flex items-center justify-center group-hover:from-[hsl(73,31%,45%)]/25 group-hover:to-[hsl(73,31%,45%)]/10 transition-all duration-300">
-                      <User className="w-5 h-5 text-[hsl(73,31%,45%)]" />
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[hsl(73,31%,45%)]/15 to-[hsl(73,31%,45%)]/5 flex items-center justify-center text-lg group-hover:from-[hsl(73,31%,45%)]/25 group-hover:to-[hsl(73,31%,45%)]/10 transition-all duration-300">
+                      {levelIcon}
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-semibold text-foreground truncate group-hover:text-[hsl(73,31%,45%)] transition-colors">{s.subject}</h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {levelIcon} {s.profile.knowledgeLevel} &middot; {s.profile.recommendedStyle} style &middot; {s.overallProgress}% complete
+                        {s.profile.knowledgeLevel} &middot; {s.profile.recommendedStyle} style &middot; {s.overallProgress}% complete
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      {/* Progress ring */}
                       <div className="relative w-10 h-10">
                         <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
                           <circle cx="18" cy="18" r="15" fill="none" stroke="hsl(0 0% 20%)" strokeWidth="2.5" />
-                          <circle
-                            cx="18" cy="18" r="15"
-                            fill="none"
-                            stroke="hsl(73 31% 45%)"
-                            strokeWidth="2.5"
-                            strokeDasharray={`${s.overallProgress * 0.942} 94.2`}
-                            strokeLinecap="round"
-                            className="transition-all duration-500"
-                          />
+                          <circle cx="18" cy="18" r="15" fill="none" stroke="hsl(73 31% 45%)" strokeWidth="2.5" strokeDasharray={`${s.overallProgress * 0.942} 94.2`} strokeLinecap="round" className="transition-all duration-500" />
                         </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[hsl(73,31%,45%)]">
-                          {s.overallProgress}%
-                        </span>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[hsl(73,31%,45%)]">{s.overallProgress}%</span>
                       </div>
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteSession(s.id)
-                        }}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id) }}
                         className="p-2 rounded-xl opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-all duration-200"
                       >
                         <Trash2 className="w-4 h-4" />

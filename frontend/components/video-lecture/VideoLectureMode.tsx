@@ -125,27 +125,24 @@ export default function VideoLectureMode() {
   if (status === 'idle' || (status === 'error' && !presentation)) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-2xl animate-fadeInUp">
-          {/* Hero */}
-          <div className="text-center mb-10">
-            <div className="relative w-18 h-18 mx-auto mb-6">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(73,31%,45%)] to-[hsl(73,40%,35%)] flex items-center justify-center mx-auto shadow-xl shadow-[hsl(73,31%,45%)]/20 animate-float">
-                <PresentationIcon className="w-7 h-7 text-white" />
-              </div>
-              <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-gradient-to-r from-[hsl(73,40%,50%)] to-[hsl(73,31%,45%)] flex items-center justify-center">
-                <Sparkles className="w-3 h-3 text-white" />
-              </div>
+        <div className="w-full max-w-xl animate-fadeInUp">
+          {/* Hero — text only */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[hsl(73,31%,45%)]/10 border border-[hsl(73,31%,45%)]/20 text-[11px] font-semibold text-[hsl(73,31%,55%)] uppercase tracking-widest mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(73,31%,50%)] animate-pulse" />
+              AI-Powered
             </div>
-            <h2 className="text-3xl font-bold text-foreground mb-3 tracking-tight">AI Video Lecture</h2>
-            <p className="text-muted-foreground text-sm max-w-lg mx-auto leading-relaxed">
-              Generate an interactive slide presentation with AI narration, 
-              smooth animations, and auto-fetched images. Just enter a topic.
+            <h2 className="text-3xl sm:text-4xl font-bold text-foreground tracking-tight leading-tight">
+              Video <span className="text-gradient">Lecture</span>
+            </h2>
+            <p className="text-muted-foreground text-sm mt-3 max-w-md mx-auto leading-relaxed">
+              Enter a topic and get an interactive slide presentation with narration, images, and smooth animations — all generated in seconds.
             </p>
           </div>
 
           {/* Error Banner */}
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-fadeIn">
+            <div className="mb-5 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-fadeIn">
               <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm text-red-300 font-medium">Generation failed</p>
@@ -161,22 +158,15 @@ export default function VideoLectureMode() {
               <label className="block text-[11px] font-bold text-muted-foreground/80 mb-2 uppercase tracking-[0.15em]">
                 Topic
               </label>
-              <div className="relative group">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="e.g. Photosynthesis, Machine Learning, Quantum Computing..."
-                  className="w-full bg-background/60 border border-border/30 rounded-xl px-4 py-3.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-[hsl(73,31%,45%)]/30 focus:border-[hsl(73,31%,45%)]/40 transition-all duration-300"
-                />
-                {topic.trim() && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <ArrowRight className="w-4 h-4 text-muted-foreground/40" />
-                  </div>
-                )}
-              </div>
+              <input
+                ref={inputRef}
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="e.g. Photosynthesis, Machine Learning, Quantum Computing..."
+                className="w-full bg-background/60 border border-border/30 rounded-xl px-4 py-3.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-[hsl(73,31%,45%)]/30 focus:border-[hsl(73,31%,45%)]/40 transition-all duration-300"
+              />
             </div>
 
             {/* Options row */}
@@ -222,19 +212,13 @@ export default function VideoLectureMode() {
             </button>
           </div>
 
-          {/* Feature pills */}
-          <div className="flex items-center justify-center gap-3 mt-8 flex-wrap">
-            {[
-              { icon: Layers, label: 'Animated Slides' },
-              { icon: ImageIcon, label: 'Auto Images' },
-              { icon: Mic, label: 'AI Narration' },
-              { icon: Clock, label: 'Auto-paced' },
-            ].map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card/40 border border-border/15 text-[11px] text-muted-foreground/70">
-                <Icon className="w-3 h-3" />
-                <span>{label}</span>
-              </div>
-            ))}
+          {/* Minimal info row */}
+          <div className="flex items-center justify-center gap-6 mt-6 text-[11px] text-muted-foreground/50">
+            <span className="flex items-center gap-1.5"><Layers className="w-3 h-3" /> Animated slides</span>
+            <span className="w-1 h-1 rounded-full bg-muted-foreground/20" />
+            <span className="flex items-center gap-1.5"><Mic className="w-3 h-3" /> AI narration</span>
+            <span className="w-1 h-1 rounded-full bg-muted-foreground/20" />
+            <span className="flex items-center gap-1.5"><ImageIcon className="w-3 h-3" /> Auto images</span>
           </div>
         </div>
       </div>
@@ -246,12 +230,7 @@ export default function VideoLectureMode() {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="text-center animate-fadeInUp max-w-sm">
-          <div className="relative w-20 h-20 mx-auto mb-6">
-            <div className="absolute inset-0 rounded-2xl bg-[hsl(73,31%,45%)]/20 animate-ping" style={{ animationDuration: '2s' }} />
-            <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-[hsl(73,31%,45%)] to-[hsl(73,40%,35%)] flex items-center justify-center shadow-xl shadow-[hsl(73,31%,45%)]/20">
-              <Loader2 className="w-8 h-8 text-white animate-spin" />
-            </div>
-          </div>
+          <Loader2 className="w-10 h-10 text-[hsl(73,31%,50%)] animate-spin mx-auto mb-5" />
           <h3 className="text-xl font-bold text-foreground mb-2 tracking-tight">Creating Your Lecture</h3>
           <p className="text-sm text-muted-foreground mb-6">{statusMessage || 'Preparing slides...'}</p>
 
