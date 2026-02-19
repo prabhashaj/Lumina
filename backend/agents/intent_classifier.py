@@ -37,27 +37,53 @@ class IntentClassifierAgent:
     """Analyzes student questions to determine difficulty, intent, and learning needs"""
     
     def __init__(self):
-        # Priority: Mistral > Groq > OpenAI
-        if settings.mistral_api_key:
+        # Use OpenRouter Mistral Small (primary), then Mistral API Medium (backup)
+        self.llm = None
+        self.backup_llm = None
+        
+        if settings.openrouter_api_key:
+            logger.info("Intent Classifier: Using Mistral Small via OpenRouter")
+            self.llm = ChatOpenAI(
+                model=settings.openrouter_model,
+                temperature=0.0,
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=500  # Small response for classification
+            )
+            # Set backup to Mistral API if available
+            if settings.mistral_api_key:
+                self.backup_llm = ChatOpenAI(
+                    model=settings.mistral_model,
+                    temperature=0.0,
+                    api_key=settings.mistral_api_key,
+                    base_url="https://api.mistral.ai/v1",
+                    max_tokens=500
+                )
+        elif settings.mistral_api_key:
+            logger.info("Intent Classifier: Using Mistral Medium via Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.0,
                 api_key=settings.mistral_api_key,
-                base_url="https://api.mistral.ai/v1"
+                base_url="https://api.mistral.ai/v1",
+                max_tokens=500
             )
-        elif settings.groq_api_key:
-            self.llm = ChatOpenAI(
-                model=settings.groq_model,
-                temperature=0.0,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
-            )
-        else:
-            self.llm = ChatOpenAI(
-                model=settings.primary_llm_model,
-                temperature=0.0,
-                api_key=settings.openai_api_key
-            )
+        
+        if not self.llm:
+            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+
+    async def _call_llm_with_fallback(self, messages):
+        """Call LLM with automatic fallback to backup on errors"""
+        try:
+            return await self.llm.ainvoke(messages)
+        except Exception as e:
+            error_str = str(e)
+            # Check for payment/credit errors
+            if self.backup_llm and ("402" in error_str or "credits" in error_str.lower() or "payment" in error_str.lower()):
+                logger.warning(f"Primary LLM failed ({error_str[:100]}), using backup Mistral API")
+                return await self.backup_llm.ainvoke(messages)
+            raise
+
         
     async def analyze(self, question: str) -> IntentAnalysis:
         """
@@ -75,7 +101,7 @@ class IntentClassifierAgent:
             prompt_text = INTENT_CLASSIFIER_PROMPT.format(question=question)
             messages = [HumanMessage(content=prompt_text)]
 
-            response = await self.llm.ainvoke(messages)
+            response = await self._call_llm_with_fallback(messages)
             
             # Log raw response for debugging
             logger.debug(f"Raw LLM response: {response.content[:200]}")

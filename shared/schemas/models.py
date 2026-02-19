@@ -102,6 +102,7 @@ class TeachingResponse(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
     processing_time: float
     follow_up_suggestions: List[str] = []
+    cost: Optional[Dict[str, Any]] = None
 
 
 class StreamChunk(BaseModel):

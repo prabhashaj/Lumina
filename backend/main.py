@@ -22,6 +22,7 @@ from langchain_openai import ChatOpenAI
 from config.settings import settings
 from graph.orchestrator import ResearchOrchestrator
 from shared.schemas.models import ResearchRequest, TeachingResponse, ErrorResponse
+from tools.cost_tracking import start_tracking, summarize_cost, record_tavily_search
 
 
 def _safe_json_loads(raw: str) -> dict:
@@ -99,6 +100,11 @@ def _safe_json_loads(raw: str) -> dict:
         raise ValueError(f"Could not parse JSON from LLM response: {e}")
 
 
+def _attach_cost(payload: dict) -> dict:
+    payload["cost"] = summarize_cost()
+    return payload
+
+
 # Initialize logger
 import os as _os
 _log_dir = _os.path.dirname(settings.log_file)
@@ -173,17 +179,19 @@ app.add_middleware(CORSHandler)
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {
+    start_tracking()
+    return _attach_cost({
         "status": "healthy",
         "service": "AI Research Teaching Agent",
         "version": "1.0.0"
-    }
+    })
 
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
-    return {
+    start_tracking()
+    return _attach_cost({
         "status": "healthy",
         "orchestrator": orchestrator is not None,
         "settings": {
@@ -191,7 +199,7 @@ async def health_check():
             "max_search_results": settings.max_search_results,
             "max_images": settings.max_images_per_response
         }
-    }
+    })
 
 
 # ─── Code AI Tutor ───────────────────────────────────────────────
@@ -199,30 +207,61 @@ async def health_check():
 _code_ai_llm = None
 
 def _get_code_ai_llm():
-    """Lazy-init an LLM for the code tutor using same priority as teaching agents."""
+    """Lazy-init an LLM for the code tutor using Mistral."""
     global _code_ai_llm
     if _code_ai_llm is None:
-        if settings.mistral_api_key:
+        if settings.openrouter_api_key:
+            _code_ai_llm = ChatOpenAI(
+                model=settings.openrouter_model,
+                temperature=0.7,
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=4000
+            )
+        elif settings.mistral_api_key:
             _code_ai_llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
-            )
-        elif settings.groq_api_key:
-            _code_ai_llm = ChatOpenAI(
-                model=settings.groq_model,
-                temperature=0.7,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1",
+                max_tokens=4000
             )
         else:
-            _code_ai_llm = ChatOpenAI(
-                model=settings.primary_llm_model,
-                temperature=0.7,
-                api_key=settings.openai_api_key,
-            )
+            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
     return _code_ai_llm
+
+
+# ─── Doubt Solver (Optimized with OpenRouter Free Router) ───────────────────
+
+_doubt_solver_llm = None
+
+def _get_doubt_solver_llm():
+    """
+    Get LLM for doubt solver using Mistral.
+    """
+    global _doubt_solver_llm
+    if _doubt_solver_llm is None:
+        if settings.openrouter_api_key:
+            logger.info("Initializing Doubt Solver with Mistral Small via OpenRouter")
+            _doubt_solver_llm = ChatOpenAI(
+                model=settings.openrouter_model,
+                temperature=0.7,
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=4000
+            )
+        elif settings.mistral_api_key:
+            logger.info("Initializing Doubt Solver with Mistral Medium via Mistral API")
+            _doubt_solver_llm = ChatOpenAI(
+                model=settings.mistral_model,
+                temperature=0.7,
+                api_key=settings.mistral_api_key,
+                base_url="https://api.mistral.ai/v1",
+                max_tokens=4000
+            )
+        else:
+            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+    return _doubt_solver_llm
 
 
 @app.post("/api/code-ai/chat")
@@ -234,6 +273,7 @@ async def code_ai_chat(request: dict):
     Returns: { response: str }
     """
     try:
+        start_tracking()
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg, AIMessage
 
         llm = _get_code_ai_llm()
@@ -278,7 +318,7 @@ async def code_ai_chat(request: dict):
         messages.append(HMsg(content=full_user_message))
 
         result = await llm.ainvoke(messages)
-        return {"response": result.content}
+        return _attach_cost({"response": result.content})
 
     except Exception as e:
         logger.error(f"Code AI chat error: {str(e)}")
@@ -298,6 +338,7 @@ async def research_question(request: ResearchRequest):
     5. Synthesize teaching-quality explanations
     """
     try:
+        start_tracking()
         logger.info(f"Received research request: {request.question[:100]}...")
         
         if not orchestrator:
@@ -306,6 +347,7 @@ async def research_question(request: ResearchRequest):
         # Process through the orchestrator
         response = await orchestrator.process_question(request)
         
+        response.cost = summarize_cost()
         return response
         
     except Exception as e:
@@ -327,6 +369,7 @@ async def research_question_stream(request: ResearchRequest):
     async def generate_stream():
         """Generate streaming response"""
         try:
+            start_tracking()
             logger.info(f"Starting streaming research: {request.question[:100]}...")
             
             # Send status update: Starting
@@ -384,6 +427,8 @@ async def research_question_stream(request: ResearchRequest):
                 logger.info(f"  Streaming Q{idx}: {q[:80]}")
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
             
+            response.cost = summarize_cost()
+
             # Send complete signal
             yield f"data: {json.dumps({'type': 'complete', 'data': response.dict()})}\n\n"
             
@@ -405,27 +450,28 @@ async def research_question_stream(request: ResearchRequest):
 @app.get("/api/config")
 async def get_config():
     """Get current configuration (non-sensitive)"""
-    return {
+    start_tracking()
+    return _attach_cost({
         "max_search_results": settings.max_search_results,
         "max_images_per_response": settings.max_images_per_response,
         "cache_ttl": settings.cache_ttl,
         "supported_models": {
-            "llm": settings.primary_llm_model,
-            "embedding": settings.embedding_model,
-            "vlm": settings.vlm_model
+            "llm_primary": settings.openrouter_model,
+            "llm_backup": settings.mistral_model,
+            "embedding": settings.embedding_model
         },
         "features": {
             "tts_enabled": bool(settings.elevenlabs_api_key),
-            "vlm_enabled": bool(settings.replicate_api_token),
             "file_upload": True
         }
-    }
+    })
 
 
 @app.post("/api/upload/image")
-async def upload_and_analyze_image(file: UploadFile = File(...), question: str = Form("")):
-    """Upload an image and analyze it with VLM to extract context"""
+async def upload_image(file: UploadFile = File(...), question: str = Form("")):
+    """Upload an image and return preview URL (VLM analysis removed)"""
     try:
+        start_tracking()
         logger.info(f"Received image upload: {file.filename}, size: {file.size}")
         
         # Read file content
@@ -436,19 +482,16 @@ async def upload_and_analyze_image(file: UploadFile = File(...), question: str =
         if file.content_type not in allowed_types:
             raise HTTPException(status_code=400, detail=f"Unsupported image type: {file.content_type}")
         
-        # Convert to base64 data URL for VLM
+        # Convert to base64 data URL
         b64_data = base64.b64encode(content).decode("utf-8")
         data_url = f"data:{file.content_type};base64,{b64_data}"
         
-        # Analyze with VLM
-        vlm_description = await _analyze_image_with_vlm(data_url, question)
-        
-        return {
+        return _attach_cost({
             "filename": file.filename,
             "content_type": file.content_type,
-            "analysis": vlm_description,
+            "analysis": "Image uploaded successfully. Describe the image in your question for best results.",
             "preview_url": data_url
-        }
+        })
         
     except HTTPException:
         raise
@@ -461,6 +504,7 @@ async def upload_and_analyze_image(file: UploadFile = File(...), question: str =
 async def upload_and_extract_file(file: UploadFile = File(...)):
     """Upload a document (PDF, DOCX, TXT) and extract its text content"""
     try:
+        start_tracking()
         logger.info(f"Received file upload: {file.filename}")
         
         content = await file.read()
@@ -501,12 +545,12 @@ async def upload_and_extract_file(file: UploadFile = File(...)):
         if len(extracted_text) > 15000:
             extracted_text = extracted_text[:15000] + "\n\n[Content truncated...]"
         
-        return {
+        return _attach_cost({
             "filename": file.filename,
             "content_type": file.content_type,
             "extracted_text": extracted_text,
             "char_count": len(extracted_text)
-        }
+        })
         
     except HTTPException:
         raise
@@ -575,6 +619,7 @@ async def text_to_speech(request: dict):
 async def generate_exam_roadmap(request: dict):
     """Generate a chapter-wise syllabus/roadmap for a subject"""
     try:
+        start_tracking()
         subject = request.get("subject", "").strip()
         if not subject:
             raise HTTPException(status_code=400, detail="No subject provided")
@@ -624,7 +669,7 @@ Return ONLY valid JSON in this exact format:
             raise ValueError("Could not parse roadmap from LLM response")
 
         roadmap = json.loads(json_match.group())
-        return roadmap
+        return _attach_cost(roadmap)
 
     except HTTPException:
         raise
@@ -648,6 +693,7 @@ async def generate_topic_content_stream(request: dict):
 
     async def generate_stream():
         try:
+            start_tracking()
             if not orchestrator:
                 yield f"data: {json.dumps({'type': 'error', 'data': 'Service not initialized'})}\n\n"
                 return
@@ -673,6 +719,7 @@ async def generate_topic_content_stream(request: dict):
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
+            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
             yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
 
         except Exception as e:
@@ -694,6 +741,7 @@ async def generate_topic_content_stream(request: dict):
 async def generate_topic_quiz(request: dict):
     """Generate a quiz for a specific topic"""
     try:
+        start_tracking()
         subject = request.get("subject", "")
         chapter = request.get("chapter", "")
         topic = request.get("topic", "")
@@ -737,34 +785,28 @@ Return ONLY valid JSON in this exact format:
         # Try multiple LLM providers for reliability
         llm_candidates = []
 
-        # Priority 1: Teaching agent's LLM (Mistral/Groq/OpenAI)
+        # Priority 1: Teaching agent's LLM (already using OpenRouter)
         if orchestrator.teaching_agent:
             llm_candidates.append(("teaching_agent", orchestrator.teaching_agent.llm))
 
-        # Priority 2: Groq directly
-        if settings.groq_api_key:
-            llm_candidates.append(("groq", ChatOpenAI(
-                model=settings.groq_model,
+        # Priority 2: OpenRouter Mistral Small
+        if settings.openrouter_api_key:
+            llm_candidates.append(("openrouter_mistral", ChatOpenAI(
+                model=settings.openrouter_model,
                 temperature=0.7,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=4000
             )))
 
-        # Priority 3: Mistral directly
+        # Priority 3: Mistral Medium via API
         if settings.mistral_api_key:
             llm_candidates.append(("mistral", ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
                 api_key=settings.mistral_api_key,
-                base_url="https://api.mistral.ai/v1"
-            )))
-
-        # Priority 4: OpenAI directly
-        if settings.openai_api_key:
-            llm_candidates.append(("openai", ChatOpenAI(
-                model=settings.primary_llm_model,
-                temperature=0.7,
-                api_key=settings.openai_api_key
+                base_url="https://api.mistral.ai/v1",
+                max_tokens=4000
             )))
 
         for provider_name, llm in llm_candidates:
@@ -805,7 +847,7 @@ Return ONLY valid JSON in this exact format:
             if "explanation" not in q:
                 q["explanation"] = "See the topic content for detailed explanation."
 
-        return quiz_data
+        return _attach_cost(quiz_data)
 
     except HTTPException:
         raise
@@ -814,114 +856,8 @@ Return ONLY valid JSON in this exact format:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _analyze_image_with_vlm(image_url: str, question: str = "") -> str:
-    """Analyze an uploaded image with VLM (Groq, Mistral, OpenAI, or Replicate)"""
-
-    prompt_text = f"""Describe this image in detail for educational purposes.
-What do you see? Include:
-- Main subject/content
-- Key details, labels, or text visible
-- Any diagrams, charts, or visual elements
-- How this relates to: {question if question else 'the topic shown'}
-
-Be specific and thorough."""
-
-    errors = []
-
-    # Priority 1: Groq vision (fast, reliable)
-    if settings.groq_api_key:
-        try:
-            from langchain_core.messages import HumanMessage as HMsg
-
-            llm = ChatOpenAI(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                temperature=0.3,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1",
-                max_tokens=1024,
-            )
-
-            message = HMsg(
-                content=[
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ]
-            )
-            result = await llm.ainvoke([message])
-            return result.content
-        except Exception as e:
-            errors.append(f"Groq VLM: {str(e)}")
-            logger.warning(f"Groq VLM failed, falling back to next provider: {str(e)}")
-
-    # Priority 2: Use Mistral's vision model (pixtral) via OpenAI-compatible API
-    if settings.mistral_api_key:
-        try:
-            from langchain_core.messages import HumanMessage as HMsg
-
-            llm = ChatOpenAI(
-                model="pixtral-12b-2409",
-                temperature=0.3,
-                api_key=settings.mistral_api_key,
-                base_url="https://api.mistral.ai/v1",
-                max_tokens=1024,
-            )
-
-            message = HMsg(
-                content=[
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ]
-            )
-            result = await llm.ainvoke([message])
-            return result.content
-        except Exception as e:
-            errors.append(f"Mistral VLM: {str(e)}")
-            logger.warning(f"Mistral VLM failed, falling back to next provider: {str(e)}")
-
-    # Priority 3: Use OpenAI GPT-4o-mini Vision
-    if settings.openai_api_key:
-        try:
-            from langchain_core.messages import HumanMessage as HMsg
-
-            llm = ChatOpenAI(
-                model="gpt-4o-mini",
-                temperature=0.3,
-                api_key=settings.openai_api_key,
-                max_tokens=1024,
-            )
-
-            message = HMsg(
-                content=[
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ]
-            )
-            result = await llm.ainvoke([message])
-            return result.content
-        except Exception as e:
-            errors.append(f"OpenAI VLM: {str(e)}")
-            logger.warning(f"OpenAI VLM failed: {str(e)}")
-
-    # Priority 4: Replicate LLaVA
-    if settings.replicate_api_token:
-        try:
-            import replicate
-            output = replicate.run(
-                "yorickvp/llava-13b:b5f6212d032508382d61ff00469ddda3e32fd8a0e75dc39d8a4191bb742157fb",
-                input={
-                    "image": image_url,
-                    "prompt": prompt_text,
-                    "max_tokens": 500
-                }
-            )
-            return "".join(output)
-        except Exception as e:
-            errors.append(f"Replicate VLM: {str(e)}")
-            logger.warning(f"Replicate VLM failed: {str(e)}")
-
-    error_detail = "; ".join(errors) if errors else "No vision API keys configured"
-    logger.error(f"All VLM providers failed: {error_detail}")
-    return f"Image uploaded but vision analysis failed. Errors: {error_detail}"
+# VLM functionality removed - not needed for educational content generation
+# Tavily search provides contextually relevant images already
 
 
 # ── Personalized Learning Endpoints ──────────────────────────────
@@ -930,6 +866,7 @@ Be specific and thorough."""
 async def generate_assessment(request: dict):
     """Generate adaptive assessment questions to gauge the user's knowledge level on a topic"""
     try:
+        start_tracking()
         topic = request.get("topic", "").strip()
         if not topic:
             raise HTTPException(status_code=400, detail="No topic provided")
@@ -982,7 +919,7 @@ Return ONLY valid JSON in this exact format:
 
         raw_json = json_match.group()
         assessment = _safe_json_loads(raw_json)
-        return assessment
+        return _attach_cost(assessment)
 
     except HTTPException:
         raise
@@ -995,6 +932,7 @@ Return ONLY valid JSON in this exact format:
 async def analyze_learner_profile(request: dict):
     """Analyze assessment answers to build a detailed learner profile"""
     try:
+        start_tracking()
         topic = request.get("topic", "").strip()
         questions = request.get("questions", [])
         answers = request.get("answers", [])
@@ -1126,7 +1064,7 @@ Rules:
 
                 raw_json = json_match.group()
                 profile = _safe_json_loads(raw_json)
-                return profile
+                return _attach_cost(profile)
             except (json.JSONDecodeError, ValueError) as e:
                 last_error = e
                 logger.warning(f"Profile parse attempt {attempt + 1} failed: {str(e)}, retrying...")
@@ -1189,6 +1127,7 @@ Provide a comprehensive, personalized explanation."""
 
     async def generate_stream():
         try:
+            start_tracking()
             if not orchestrator:
                 yield f"data: {json.dumps({'type': 'error', 'data': 'Service not initialized'})}\n\n"
                 return
@@ -1214,6 +1153,7 @@ Provide a comprehensive, personalized explanation."""
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
+            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
             yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
 
         except Exception as e:
@@ -1283,6 +1223,7 @@ async def _resolve_slide_images(slides: list, topic: str):
                 if not original_query:
                     original_query = f"{topic} {slides[first_idx].get('title', '')}".strip()
 
+                record_tavily_search("basic", 1)
                 resp = client.search(
                     query=original_query,
                     include_images=True,
@@ -1324,6 +1265,7 @@ async def generate_video_lecture(request: dict):
     Returns the full presentation JSON including per-slide audio.
     """
     try:
+        start_tracking()
         topic = request.get("topic", "").strip()
         if not topic:
             raise HTTPException(status_code=400, detail="No topic provided")
@@ -1355,6 +1297,7 @@ async def generate_video_lecture(request: dict):
             slide["narration_text"] = n.get("text", slide.get("speaker_notes", ""))
             slide["duration_estimate"] = n.get("duration_estimate", 5)
 
+        presentation["cost"] = summarize_cost()
         return presentation
 
     except HTTPException:
@@ -1379,6 +1322,7 @@ async def generate_video_lecture_stream(request: dict):
 
     async def event_stream():
         try:
+            start_tracking()
             slide_agent = _get_slide_agent()
             narration_agent = _get_narration_agent()
 
@@ -1408,6 +1352,7 @@ async def generate_video_lecture_stream(request: dict):
 
                 yield f"data: {json.dumps({'type': 'slide', 'data': slide})}\n\n"
 
+            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
             yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
 
         except Exception as e:
@@ -1432,13 +1377,14 @@ async def narrate_single_slide(request: dict):
     Body: { "text": str }
     """
     try:
+        start_tracking()
         text = request.get("text", "").strip()
         if not text:
             raise HTTPException(status_code=400, detail="No text provided")
 
         narration_agent = _get_narration_agent()
         result = await narration_agent.generate_slide_audio(text)
-        return result
+        return _attach_cost(result)
 
     except HTTPException:
         raise
@@ -1456,6 +1402,7 @@ async def doubt_solver(file: UploadFile = File(...), question: str = Form("")):
     The AI OCRs it and explains / solves / generates practice from it.
     """
     try:
+        start_tracking()
         logger.info(f"Doubt solver upload: {file.filename}")
         content = await file.read()
 
@@ -1466,32 +1413,32 @@ async def doubt_solver(file: UploadFile = File(...), question: str = Form("")):
         b64_data = base64.b64encode(content).decode("utf-8")
         data_url = f"data:{file.content_type};base64,{b64_data}"
 
-        # Step 1 – VLM extracts text / diagram description
-        ocr_description = await _analyze_image_with_vlm(
-            data_url,
-            question or "Extract all text, equations, diagrams, and problems visible in this image. Be very thorough."
-        )
+        # Image analysis disabled - user should describe the image in their question
+        ocr_description = "[Image uploaded - please describe what you see in your question for best help]"
 
         # Step 2 – LLM explains / solves
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg
 
-        llm = _get_code_ai_llm()
+        llm = _get_doubt_solver_llm()
 
-        system = SystemMessage(content="""You are Lumina Doubt Solver — an expert tutor for students.
+        system = SystemMessage(content="""You are Lumina Doubt Solver — a brilliant, patient tutor who makes complex concepts click.
 You receive OCR-extracted content from a student's uploaded image (textbook page, notes, problem set, etc.) plus an optional question.
 
-Your job:
-1. **Identify** what the student is looking at (subject, topic, type of content).
-2. **Explain** the core concepts shown clearly and simply.
-3. **Solve** any problems/equations step-by-step with clear reasoning.
-4. **Practice** — generate 2-3 similar practice problems with answers.
+Your teaching approach:
+1. **Identify** what the student is looking at (subject, topic, type of content) and acknowledge it.
+2. **Explain** the core concepts with clarity — use analogies, build from simple to complex, and always explain the "why" behind each step.
+3. **Solve** any problems/equations step-by-step with detailed reasoning. Don't skip steps. Show your thought process so the student learns HOW to think, not just the answer.
+4. **Highlight** common mistakes students make on this type of problem and how to avoid them.
+5. **Practice** — generate 2-3 similar practice problems with hints (and answers at the end).
 
-Rules:
-- Use LaTeX for math: inline $...$ and display $$...$$
-- Use markdown formatting with headers, bullet points, bold, etc.
-- Be encouraging and supportive like a great teacher.
-- If the image contains multiple problems, address each one.
-- If unsure about OCR accuracy, note assumptions.
+Teaching rules:
+- Use LaTeX for all math: inline $...$ and display $$...$$
+- Structure with clear markdown headers, bullet points, numbered steps, and bold key terms.
+- Be warm, encouraging, and conversational — like the best tutor the student has ever had.
+- Explain each step as if the student is seeing this type of problem for the first time.
+- If the image contains multiple problems, address each one thoroughly.
+- If unsure about OCR accuracy, note your assumptions clearly.
+- End with a brief "Key Insight" that summarizes the most important takeaway.
 """)
 
         user_msg = f"""## Extracted content from student's uploaded image:
@@ -1503,12 +1450,12 @@ Rules:
 
         result = await llm.ainvoke([system, HMsg(content=user_msg)])
 
-        return {
+        return _attach_cost({
             "filename": file.filename,
             "preview_url": "",
             "ocr_text": ocr_description,
             "solution": result.content,
-        }
+        })
 
     except HTTPException:
         raise
@@ -1525,6 +1472,7 @@ async def doubt_solver_chat(request: dict):
     Body: { "message": str, "conversation_history": [{"role":str,"content":str}], "image_base64"?: str, "image_type"?: str }
     """
     try:
+        start_tracking()
         message = request.get("message", "").strip()
         history = request.get("conversation_history", [])
         image_b64 = request.get("image_base64", "")
@@ -1535,32 +1483,32 @@ async def doubt_solver_chat(request: dict):
 
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg
 
-        llm = _get_code_ai_llm()
+        llm = _get_doubt_solver_llm()
 
-        # If image is provided, run VLM first
+        # Image analysis disabled - user should describe the image
         image_context = ""
         if image_b64:
-            data_url = f"data:{image_type};base64,{image_b64}"
-            image_context = await _analyze_image_with_vlm(
-                data_url,
-                message or "Extract all text, equations, diagrams, and problems visible in this image. Be very thorough."
-            )
+            image_context = "[Image uploaded - please describe what you see for best assistance]"
 
-        system = SystemMessage(content="""You are Lumina Doubt Solver — an expert tutor who helps students understand concepts and solve problems through conversation.
+        system = SystemMessage(content="""You are Lumina Doubt Solver — a brilliant, patient tutor who helps students truly understand concepts through conversation.
+
+Your teaching philosophy: Don't just give answers — build understanding. Every response should leave the student smarter.
 
 Your capabilities:
-1. **Explain** concepts clearly with examples and analogies.
-2. **Solve** problems step-by-step with clear reasoning.
-3. **Follow up** on previous discussion with deeper insights.
-4. **Practice** — suggest practice problems when appropriate.
+1. **Explain** concepts with layered clarity — start simple, add depth, use analogies and real-world connections.
+2. **Solve** problems step-by-step with transparent reasoning. Show your thought process: "First I notice X, which tells me Y, so I'll approach it by Z."
+3. **Connect** new ideas to things the student already knows from the conversation.
+4. **Challenge** — ask thought-provoking follow-up questions to deepen understanding.
+5. **Practice** — suggest targeted practice problems when appropriate, with hints.
 
-Rules:
-- Use LaTeX for math: inline $...$ and display $$...$$ 
-- Use markdown formatting with headers, bullet points, bold, etc.
-- Be encouraging and supportive like a great teacher.
-- Reference previous conversation context when answering follow-ups.
-- If an image was analyzed, incorporate that context into your response.
-- Keep responses focused and well-structured.
+Teaching rules:
+- Use LaTeX for all math: inline $...$ and display $$...$$
+- Structure with clear markdown: headers, bullet points, numbered steps, **bold** key terms.
+- Be warm, encouraging, and conversational — celebrate when the student shows understanding.
+- Reference previous conversation context to build a learning arc.
+- When explaining, always address the "why" — not just the "what" or "how."
+- Highlight common mistakes and misconceptions proactively.
+- Keep responses focused but thorough — cover what needs covering, nothing more.
 """)
 
         # Build messages from history
@@ -1577,7 +1525,7 @@ Rules:
         # Build current user message
         user_msg_parts = []
         if image_context:
-            user_msg_parts.append(f"[Image content extracted via OCR/VLM]:\n{image_context}")
+            user_msg_parts.append(f"[Note: Image uploaded but analysis is disabled. Please describe the image content]:\n{image_context}")
         if message:
             user_msg_parts.append(message)
 
@@ -1585,10 +1533,10 @@ Rules:
 
         result = await llm.ainvoke(chat_messages)
 
-        return {
+        return _attach_cost({
             "response": result.content,
             "image_context": image_context if image_context else None,
-        }
+        })
 
     except HTTPException:
         raise
@@ -1606,6 +1554,7 @@ async def guide_chat(request: dict):
     Body: { "message": str, "mode": str, "context": str, "conversation_history": [{"role":str,"content":str}] }
     """
     try:
+        start_tracking()
         message = request.get("message", "").strip()
         mode = request.get("mode", "general")
         context = request.get("context", "")
@@ -1675,7 +1624,7 @@ Rules:
 
         result = await llm.ainvoke(chat_messages)
 
-        return {"response": result.content}
+        return _attach_cost({"response": result.content})
 
     except HTTPException:
         raise
@@ -1694,6 +1643,7 @@ async def generate_flashcards(request: dict):
     Returns: { cards: [{ front, back, difficulty }] }
     """
     try:
+        start_tracking()
         topic = request.get("topic", "").strip()
         content = request.get("content", "").strip()
         count = min(request.get("count", 10), 20)
@@ -1749,7 +1699,7 @@ Rules:
         else:
             cards = []
 
-        return {"cards": cards, "topic": topic}
+        return _attach_cost({"cards": cards, "topic": topic})
 
     except HTTPException:
         raise
@@ -1772,6 +1722,7 @@ async def run_code_playground(request: dict):
     import time
 
     try:
+        start_tracking()
         code = request.get("code", "").strip()
         language = request.get("language", "python").lower()
         stdin_data = request.get("stdin", "")
@@ -1795,12 +1746,12 @@ async def run_code_playground(request: dict):
                         timeout=10, input=stdin_data,
                     )
                     elapsed = round((time.time() - start_time) * 1000)
-                    return {
+                    return _attach_cost({
                         "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
                         "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
                         "exitCode": proc.returncode,
                         "executionTime": elapsed,
-                    }
+                    })
                 finally:
                     import os
                     os.unlink(f.name)
@@ -1816,18 +1767,18 @@ async def run_code_playground(request: dict):
                         timeout=10, input=stdin_data,
                     )
                     elapsed = round((time.time() - start_time) * 1000)
-                    return {
+                    return _attach_cost({
                         "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
                         "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
                         "exitCode": proc.returncode,
                         "executionTime": elapsed,
-                    }
+                    })
                 finally:
                     import os
                     os.unlink(f.name)
 
     except subprocess.TimeoutExpired:
-        return {"stdout": "", "stderr": "Execution timed out (10s limit)", "exitCode": 1, "executionTime": 10000}
+        return _attach_cost({"stdout": "", "stderr": "Execution timed out (10s limit)", "exitCode": 1, "executionTime": 10000})
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail=f"Runtime for '{language}' not found on server")
     except HTTPException:
@@ -1844,6 +1795,7 @@ async def explain_code(request: dict):
     Body: { "code": str, "language": str, "action": "explain"|"debug"|"exercise"|"optimize", "error"?: str }
     """
     try:
+        start_tracking()
         code = request.get("code", "").strip()
         language = request.get("language", "python")
         action = request.get("action", "explain")
@@ -1881,7 +1833,7 @@ Error message: {error}""",
         user_msg = f"```{language}\n{code}\n```"
 
         result = await llm.ainvoke([system, HMsg(content=user_msg)])
-        return {"result": result.content, "action": action}
+        return _attach_cost({"result": result.content, "action": action})
 
     except HTTPException:
         raise

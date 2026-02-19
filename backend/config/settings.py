@@ -11,17 +11,14 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings"""
     
-    # API Keys
-    openai_api_key: str = ""
-    groq_api_key: str = ""
+    # API Keys (Using Mistral only)
     mistral_api_key: str = ""
+    openrouter_api_key: str = ""
     tavily_api_key: str = ""
-    replicate_api_token: str = ""
-    use_groq: bool = False
-    elevenlabs_api_key: str = ""
+    elevenlabs_api_key: str = "sk_f6cae34774420dcc91c0db416735fdb73617fab765aebf0b"
     
     # TTS Configuration
-    tts_voice_id: str = "XB0fDUnXU5powFXDhCwa"  # Charlotte - soft, warm, realistic female voice
+    tts_voice_id: str = "MF3mGyEYCl7XYWbV9V6O"  # Elli - soft female voice (free tier)
     tts_model: str = "eleven_multilingual_v2"  # Most natural-sounding model
     
     # Redis Configuration
@@ -34,18 +31,17 @@ class Settings(BaseSettings):
     vector_db_type: str = "faiss"
     vector_db_path: str = "./data/vector_db"
     
-    # Model Configuration
-    primary_llm_model: str = "mistral-medium-latest"
-    fallback_llm_model: str = "mistral-small-latest"
-    groq_model: str = "llama3-8b-8192"
-    mistral_model: str = "mistral-medium-latest"
+    # Model Configuration (OpenRouter Mistral Small primary, Mistral Medium backup)
+    openrouter_model: str = "mistralai/mistral-small-3.1-24b-instruct"  # Primary via OpenRouter
+    mistral_model: str = "mistral-medium-latest"  # Backup via Mistral API
     embedding_model: str = "text-embedding-3-small"
-    vlm_model: str = "llava-v1.6-34b"
     
     # System Configuration
-    max_search_results: int = 10
+    max_search_results: int = 5
     max_images_per_response: int = 6
     cache_ttl: int = 3600
+    search_cache_ttl: int = 1800          # Tavily result cache TTL (seconds)
+    search_cache_max_size: int = 256      # Max cached search entries
     max_retries: int = 3
     timeout_seconds: int = 30
     

@@ -23,32 +23,57 @@ class TeachingSynthesisAgent:
     """Synthesizes research into comprehensive teaching content"""
     
     def __init__(self):
-        # Priority: Mistral > Groq > OpenAI
-        if settings.mistral_api_key:
+        # Use OpenRouter Mistral Small (primary), then Mistral API Medium (backup)
+        self.llm = None
+        self.backup_llm = None
+        
+        if settings.openrouter_api_key:
+            logger.info("Teaching Synthesis: Using Mistral Small via OpenRouter")
+            self.llm = ChatOpenAI(
+                model=settings.openrouter_model,
+                temperature=0.7,
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=8000  # Large context for comprehensive teaching content
+            )
+            # Set backup to Mistral API if available
+            if settings.mistral_api_key:
+                self.backup_llm = ChatOpenAI(
+                    model=settings.mistral_model,
+                    temperature=0.7,
+                    api_key=settings.mistral_api_key,
+                    base_url="https://api.mistral.ai/v1",
+                    max_tokens=8000
+                )
+        elif settings.mistral_api_key:
+            logger.info("Teaching Synthesis: Using Mistral Medium via Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
                 api_key=settings.mistral_api_key,
-                base_url="https://api.mistral.ai/v1"
+                base_url="https://api.mistral.ai/v1",
+                max_tokens=8000
             )
-        elif settings.groq_api_key:
-            self.llm = ChatOpenAI(
-                model=settings.groq_model,
-                temperature=0.7,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
-            )
-        else:
-            self.llm = ChatOpenAI(
-                model=settings.primary_llm_model,
-                temperature=0.7,
-                api_key=settings.openai_api_key
-            )
+        
+        if not self.llm:
+            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+
+    async def _call_llm_with_fallback(self, messages):
+        """Call LLM with automatic fallback to backup on errors"""
+        try:
+            return await self.llm.ainvoke(messages)
+        except Exception as e:
+            error_str = str(e)
+            # Check for payment/credit errors
+            if self.backup_llm and ("402" in error_str or "credits" in error_str.lower() or "payment" in error_str.lower()):
+                logger.warning(f"Primary LLM failed, using backup Mistral API")
+                return await self.backup_llm.ainvoke(messages)
+            raise
 
     async def _call_llm(self, prompt: str) -> str:
         """Direct LLM call for structured generation (roadmaps, quizzes, etc.)"""
         try:
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+            response = await self._call_llm_with_fallback([HumanMessage(content=prompt)])
             return response.content
         except Exception as e:
             logger.error(f"LLM call error: {str(e)}")
@@ -81,8 +106,8 @@ class TeachingSynthesisAgent:
             # Build research summary
             research_content = self._format_research(extracted_content, sources)
             
-            # Format VLM image analysis for teaching integration
-            image_analysis = self._format_image_analysis(images)
+            # Format image references (no VLM analysis, just URLs)
+            image_references = self._format_image_references(images)
             
             # Get difficulty-specific instructions
             difficulty_instructions = {
@@ -91,15 +116,14 @@ class TeachingSynthesisAgent:
                 "advanced": TEACHING_SYNTHESIS_ADVANCED
             }.get(intent.difficulty_level.value, "")
             
-            # Create main prompt with VLM insights
+            # Create main prompt
             full_prompt = TEACHING_SYNTHESIS_PROMPT + "\n\n" + difficulty_instructions
             
-            # Add image analysis section if images available
-            if image_analysis:
-                full_prompt += "\n\n## IMPORTANT: Visual Content Analysis\n"
-                full_prompt += "The following images have been analyzed using AI vision. INTEGRATE these visual descriptions into your explanation:\n\n"
-                full_prompt += image_analysis
-                full_prompt += "\n\nWhen explaining, REFERENCE these visuals (e.g., 'As shown in the diagram...' or 'The illustration demonstrates...')"
+            # Add image section if images available
+            if image_references:
+                full_prompt += "\n\n## Visual Content Available\n"
+                full_prompt += "Visual aids are provided to enhance learning. Reference them naturally in your explanation:\n\n"
+                full_prompt += image_references
             
             prompt_text = full_prompt.format(
                 question=question,
@@ -111,7 +135,7 @@ class TeachingSynthesisAgent:
             )
             messages = [HumanMessage(content=prompt_text)]
 
-            response = await self.llm.ainvoke(messages)
+            response = await self._call_llm_with_fallback(messages)
             content = response.content
             
             logger.info(f"LLM response length: {len(content)} chars")
@@ -189,19 +213,19 @@ class TeachingSynthesisAgent:
         """Format research content with source references"""
         formatted = []
         for idx, (content, source) in enumerate(zip(content_list, sources[:len(content_list)])):
-            formatted.append(f"[{idx + 1}] {source.domain}: {content[:500]}...")
+            formatted.append(f"[{idx + 1}] {source.domain}: {content[:2000]}")
         return "\n\n".join(formatted)
     
-    def _format_image_analysis(self, images: List[ImageData]) -> str:
-        """Format VLM image analysis for teaching integration"""
+    def _format_image_references(self, images: List[ImageData]) -> str:
+        """Format image references for teaching integration (no VLM analysis needed)"""
         if not images:
             return ""
         
         formatted = []
         for idx, img in enumerate(images, 1):
-            formatted.append(f"**Image {idx}** (Relevance: {img.relevance_score:.0%}):\n{img.caption}")
+            formatted.append(f"**Visual {idx}**: {img.caption}")
         
-        return "\n\n".join(formatted)
+        return "\n".join(formatted)
     
     def _parse_teaching_content(self, content: str) -> dict:
         """Parse the structured teaching response"""
@@ -360,21 +384,28 @@ class TeachingSynthesisAgent:
     async def _generate_practice_questions(self, question: str, difficulty: str) -> List[str]:
         """Generate exactly 4 unique practice questions"""
         try:
-            prompt = f"""Generate EXACTLY 4 COMPLETELY DIFFERENT practice questions for a {difficulty} level student about:
+            prompt = f"""You are creating practice questions for a {difficulty}-level student who just learned about:
 
-{question}
+"{question}"
 
-Make each question UNIQUE and progressively challenging:
-1. Basic recall (What is...? / Define...)
-2. Application (How would you use...? / Give an example...)
-3. Analysis (Why does...? / Compare...)
-4. Synthesis (What if...? / Design...)
+Generate EXACTLY 4 specific, thought-provoking questions that test real understanding (not just memorization). Each question should be progressively more challenging:
 
-IMPORTANT: Each question MUST be completely different. No duplicates!
-Return ONLY 4 questions as a numbered list."""
+1. **Recall & Define** — A clear "What is...?" or "Define..." question about a KEY concept from the topic. Be specific — name the actual concept.
+2. **Apply & Explain** — A "How would you...?" or "Explain how..." question that requires applying knowledge to a specific scenario.  
+3. **Analyze & Compare** — A "Why does...?" or "Compare X and Y..." question that requires deeper reasoning and analysis.
+4. **Create & Predict** — A "What would happen if...?" or "Design a..." question that requires synthesis and creative thinking.
+
+RULES:
+- Each question MUST be a complete sentence ending with a question mark
+- Each question MUST reference specific concepts from the topic (not generic)
+- Each question MUST be completely different from the others
+- Do NOT include answers, just the questions
+- Do NOT include category labels — just the numbered question
+
+Return ONLY 4 questions as a numbered list (1. 2. 3. 4.)."""
 
             messages = [HumanMessage(content=prompt)]
-            response = await self.llm.ainvoke(messages)
+            response = await self._call_llm_with_fallback(messages)
             
             questions = []
             seen_normalized = set()  # Track normalized versions

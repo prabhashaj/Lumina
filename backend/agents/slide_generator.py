@@ -257,26 +257,52 @@ class SlideGeneratorAgent:
     """Generates structured presentation slides with narration scripts"""
 
     def __init__(self):
-        if settings.mistral_api_key:
+        # Use OpenRouter Mistral Small (primary), then Mistral API Medium (backup)
+        self.llm = None
+        self.backup_llm = None
+        
+        if settings.openrouter_api_key:
+            logger.info("Slide Generator: Using Mistral Small via OpenRouter")
+            self.llm = ChatOpenAI(
+                model=settings.openrouter_model,
+                temperature=0.7,
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                max_tokens=6000  # Slides with narration
+            )
+            # Set backup to Mistral API if available
+            if settings.mistral_api_key:
+                self.backup_llm = ChatOpenAI(
+                    model=settings.mistral_model,
+                    temperature=0.7,
+                    api_key=settings.mistral_api_key,
+                    base_url="https://api.mistral.ai/v1",
+                    max_tokens=6000
+                )
+        elif settings.mistral_api_key:
+            logger.info("Slide Generator: Using Mistral Medium via Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
+                max_tokens=6000
             )
-        elif settings.groq_api_key:
-            self.llm = ChatOpenAI(
-                model=settings.groq_model,
-                temperature=0.7,
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1",
-            )
-        else:
-            self.llm = ChatOpenAI(
-                model=settings.primary_llm_model,
-                temperature=0.7,
-                api_key=settings.openai_api_key,
-            )
+        
+        if not self.llm:
+            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+
+    async def _call_llm_with_fallback(self, messages):
+        """Call LLM with automatic fallback to backup on errors"""
+        try:
+            return await self.llm.ainvoke(messages)
+        except Exception as e:
+            error_str = str(e)
+            # Check for payment/credit errors
+            if self.backup_llm and ("402" in error_str or "credits" in error_str.lower() or "payment" in error_str.lower()):
+                logger.warning(f"Primary LLM failed, using backup Mistral API")
+                return await self.backup_llm.ainvoke(messages)
+            raise
 
     @staticmethod
     def _clean_llm_json(raw: str) -> str:
@@ -436,7 +462,7 @@ CRITICAL RULES:
         for attempt in range(3):
             try:
                 logger.info(f"Generating {num_slides} slides for topic: {topic} (attempt {attempt + 1})")
-                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                response = await self._call_llm_with_fallback([HumanMessage(content=prompt)])
                 raw = response.content.strip()
                 cleaned = self._clean_llm_json(raw)
 

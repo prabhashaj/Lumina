@@ -10,8 +10,8 @@ from loguru import logger
 from agents.intent_classifier import IntentClassifierAgent
 from agents.search_agent import WebSearchAgent
 from agents.content_extraction import ContentExtractionAgent
-from agents.image_understanding import ImageUnderstandingAgent
 from agents.teaching_synthesis import TeachingSynthesisAgent
+from agents.search_router import SearchRouter, SearchPlan, SearchComplexity
 from shared.schemas.models import (
     ResearchRequest, TeachingResponse, AgentState,
     SearchResult, Source, ImageData, SourceType, IntentAnalysis
@@ -43,8 +43,8 @@ class ResearchOrchestrator:
         self.intent_agent = IntentClassifierAgent()
         self.search_agent = WebSearchAgent()
         self.content_agent = ContentExtractionAgent()
-        self.image_agent = ImageUnderstandingAgent()
         self.teaching_agent = TeachingSynthesisAgent()
+        self.search_router = SearchRouter()
         
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -56,19 +56,21 @@ class ResearchOrchestrator:
         
         # Add nodes (agents)
         workflow.add_node("classify_intent", self.classify_intent_node)
+        workflow.add_node("plan_search", self.plan_search_node)
         workflow.add_node("generate_queries", self.generate_queries_node)
         workflow.add_node("search_web", self.search_web_node)
         workflow.add_node("extract_content", self.extract_content_node)
-        workflow.add_node("process_images", self.process_images_node)
+        workflow.add_node("select_images", self.select_images_node)
         workflow.add_node("synthesize_teaching", self.synthesize_teaching_node)
         workflow.add_node("assess_quality", self.assess_quality_node)
         
         # Define the flow (sequential pipeline)
-        workflow.add_edge("classify_intent", "generate_queries")
+        workflow.add_edge("classify_intent", "plan_search")
+        workflow.add_edge("plan_search", "generate_queries")
         workflow.add_edge("generate_queries", "search_web")
         workflow.add_edge("search_web", "extract_content")
-        workflow.add_edge("extract_content", "process_images")
-        workflow.add_edge("process_images", "synthesize_teaching")
+        workflow.add_edge("extract_content", "select_images")
+        workflow.add_edge("select_images", "synthesize_teaching")
         workflow.add_edge("synthesize_teaching", "assess_quality")
         
         # Conditional edge: retry if quality is low
@@ -161,12 +163,32 @@ class ResearchOrchestrator:
         intent = await self.intent_agent.analyze(state["original_question"] if isinstance(state, dict) else state.original_question)
         
         return {"intent": intent}
+
+    async def plan_search_node(self, state: AgentState) -> Dict[str, Any]:
+        """Node: Use SearchRouter to create an optimised SearchPlan (zero LLM cost)."""
+        logger.info("NODE: Planning search strategy...")
+
+        if isinstance(state, dict):
+            query = state["original_question"]
+            intent = state.get("intent")
+            metadata = state.get("metadata", {})
+        else:
+            query = state.original_question
+            intent = state.intent
+            metadata = state.metadata
+
+        plan = self.search_router.plan(query, intent)
+
+        # Serialise plan into metadata so downstream nodes can read it
+        metadata["search_plan"] = plan
+        metadata["search_complexity"] = plan.complexity.value
+
+        return {"metadata": metadata}
     
     async def generate_queries_node(self, state: AgentState) -> Dict[str, Any]:
-        """Node: Generate optimized search queries"""
+        """Node: Generate search queries – count is controlled by the SearchPlan."""
         logger.info("NODE: Generating search queries...")
-        
-        # Handle both dict and Pydantic model
+
         if isinstance(state, dict):
             base_query = state["original_question"]
             intent = state.get("intent")
@@ -175,41 +197,35 @@ class ResearchOrchestrator:
             base_query = state.original_question
             intent = state.intent
             metadata = state.metadata
-        
-        concepts = intent.key_concepts if intent else []
-        
-        queries = [
-            base_query,
-            f"{base_query} explanation beginner",
-            f"{base_query} visual diagram",
-            f"{' '.join(concepts[:2])} examples" if concepts else base_query,
-        ]
-        
-        # Add specialized query based on type
-        if intent:
-            if intent.requires_math:
-                queries.append(f"{base_query} formula derivation")
-            if intent.requires_code:
-                queries.append(f"{base_query} code example tutorial")
-        
-        metadata["search_queries"] = queries[:5]
-        
+
+        plan: SearchPlan = metadata.get("search_plan")
+
+        if plan:
+            queries = self.search_router.generate_queries(base_query, intent, plan)
+        else:
+            # Fallback to simple single query
+            queries = [base_query]
+
+        metadata["search_queries"] = queries
+        logger.info(f"Generated {len(queries)} search queries (plan: {plan.complexity.value if plan else 'none'})")
+
         return {"metadata": metadata}
     
     async def search_web_node(self, state: AgentState) -> Dict[str, Any]:
-        """Node: Execute web searches"""
+        """Node: Execute web searches using plan-aware agent."""
         logger.info("NODE: Searching web...")
-        
+
         if isinstance(state, dict):
             metadata = state.get("metadata", {})
             original_question = state["original_question"]
         else:
             metadata = state.metadata
             original_question = state.original_question
-        
+
         queries = metadata.get("search_queries", [original_question])
-        
-        search_results = await self.search_agent.multi_query_search(queries)
+        plan: SearchPlan = metadata.get("search_plan")
+
+        search_results = await self.search_agent.multi_query_search(queries, plan=plan)
         
         # Collect and aggressively deduplicate image URLs
         all_images = []
@@ -234,7 +250,7 @@ class ResearchOrchestrator:
                     seen_images.add(normalized_url)
         
         logger.info(f"Collected {len(all_images)} strongly deduplicated unique images from search results")
-        metadata["raw_images"] = all_images[:10]  # Limit to top 10 for VLM processing (faster)
+        metadata["raw_images"] = all_images[:6]  # Limit to top 6 candidates
         
         return {"search_results": search_results, "metadata": metadata}
     
@@ -269,9 +285,9 @@ class ResearchOrchestrator:
         
         return {"extracted_content": extracted, "sources": sources}
     
-    async def process_images_node(self, state: AgentState) -> Dict[str, Any]:
-        """Node: Analyze and rank images using VLM"""
-        logger.info("NODE: Processing images with VLM...")
+    async def select_images_node(self, state: AgentState) -> Dict[str, Any]:
+        """Node: Select top images from Tavily results (no VLM analysis needed)"""
+        logger.info("NODE: Selecting images from search results...")
         
         if isinstance(state, dict):
             metadata = state.get("metadata", {})
@@ -285,52 +301,63 @@ class ResearchOrchestrator:
         raw_images = metadata.get("raw_images", [])
         concepts = intent.key_concepts if intent else []
 
-        # Extract a clean, short topic from the (possibly very long) question
-        # This prevents full personalization prompts from leaking into image captions
+        # Extract a clean, short topic for image search
         clean_topic = original_question.strip().split('\n')[0][:120]
-        # Remove any prompt instructions that leak into topic
         for prefix in ["Teach me about '", "Teach me about "]:
             if clean_topic.startswith(prefix):
                 clean_topic = clean_topic[len(prefix):].rstrip("'").split("'")[0]
                 break
-        # Also strip anything after common prompt markers
         for marker in [" CRITICAL ", " TEACHING INSTRUCTIONS", " PERSONALIZATION", " Rules:", " Generate "]:
             if marker in clean_topic:
                 clean_topic = clean_topic[:clean_topic.index(marker)].strip()
         if not clean_topic:
             clean_topic = " ".join(concepts[:3]) if concepts else "topic"
-        logger.info(f"Clean topic for image processing: {clean_topic}")
 
-        # Fallback: if no images were found in the primary search, do a dedicated image search
+        # Fallback: if no images from primary search, do dedicated image search
         if not raw_images:
             logger.info("No images from primary search — running dedicated image search...")
             try:
                 image_query = f"{clean_topic} diagram illustration"
+                from agents.search_router import SearchPlan, SearchComplexity
+                img_plan = SearchPlan(
+                    complexity=SearchComplexity.SIMPLE,
+                    search_depth="basic",
+                    max_results=3,
+                    num_queries=1,
+                    include_raw_content=False,
+                    include_images=True,
+                    include_answer=False,
+                    context_budget_chars=2000,
+                )
                 image_results = await self.search_agent.search(
                     query=image_query,
-                    search_depth="basic",
-                    include_images=True
+                    plan=img_plan,
                 )
                 for r in image_results:
                     for img_url in r.images:
                         normalized = img_url.lower().split('?')[0]
                         if normalized not in set(u.lower().split('?')[0] for u in raw_images):
                             raw_images.append(img_url)
-                logger.info(f"Dedicated image search found {len(raw_images)} images for: {image_query[:80]}")
+                logger.info(f"Dedicated image search found {len(raw_images)} images")
             except Exception as e:
                 logger.warning(f"Dedicated image search failed: {e}")
         
-        # Always process images if available, VLM will analyze and rank them
+        # Select top 2-3 unique images (Tavily already ranks by relevance)
+        images = []
         if raw_images:
-            images = await self.image_agent.process_images(
-                raw_images,
-                clean_topic,
-                concepts,
-                max_images=2  # Limit to exactly 2 best unique images
-            )
-            logger.info(f"Selected exactly {len(images)} unique images after VLM analysis")
-        else:
-            images = []
+            seen_urls = set()
+            for img_url in raw_images[:6]:  # Look at top 6 candidates
+                normalized = img_url.lower().split('?')[0]
+                if normalized not in seen_urls:
+                    seen_urls.add(normalized)
+                    images.append(ImageData(
+                        url=img_url,
+                        caption=f"Visual illustration related to {clean_topic}",
+                        relevance_score=0.8  # Tavily pre-filters for relevance
+                    ))
+                    if len(images) >= 2:  # Limit to 2 images
+                        break
+            logger.info(f"Selected {len(images)} unique images from Tavily results")
         
         return {"images": images}
     
