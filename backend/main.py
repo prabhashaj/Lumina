@@ -2,14 +2,12 @@
 FastAPI main application
 """
 import sys
-import re
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
@@ -21,7 +19,7 @@ from langchain_openai import ChatOpenAI
 
 from config.settings import settings
 from graph.orchestrator import ResearchOrchestrator
-from shared.schemas.models import ResearchRequest, TeachingResponse, ErrorResponse
+from shared.schemas.models import ResearchRequest, TeachingResponse
 from tools.cost_tracking import start_tracking, summarize_cost, record_tavily_search
 
 
@@ -1049,8 +1047,6 @@ Rules:
 - Do NOT use any markdown formatting inside the JSON strings
 - Return ONLY the JSON object, nothing else"""
 
-        llm_response = await agent._call_llm(profile_prompt)
-
         # Try up to 2 attempts
         last_error = None
         for attempt in range(2):
@@ -1630,215 +1626,6 @@ Rules:
         raise
     except Exception as e:
         logger.error(f"Guide chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ─────────────────────── Flashcard Generation ──────────────────────────
-
-@app.post("/api/flashcards/generate")
-async def generate_flashcards(request: dict):
-    """
-    Generate flashcards from a topic or pasted content.
-    Body: { "topic": str, "content"?: str, "count"?: int }
-    Returns: { cards: [{ front, back, difficulty }] }
-    """
-    try:
-        start_tracking()
-        topic = request.get("topic", "").strip()
-        content = request.get("content", "").strip()
-        count = min(request.get("count", 10), 20)
-
-        if not topic and not content:
-            raise HTTPException(status_code=400, detail="Provide a topic or content")
-
-        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
-        llm = _get_code_ai_llm()
-
-        system = SystemMessage(content=f"""You are a flashcard generator for spaced-repetition learning.
-Generate exactly {count} flashcards as a JSON array.
-
-Each flashcard must have:
-- "front": The question/prompt (concise, clear)
-- "back": The answer/explanation (thorough but focused)
-- "difficulty": 1-5 (1=easy recall, 5=very hard)
-
-Rules:
-- Cover the most important concepts first.
-- Mix question types: definitions, fill-in-blank, true/false, short-answer, application.
-- Use LaTeX ($...$) for math/science formulas.
-- Return ONLY a valid JSON array, no other text.
-""")
-
-        user_content = f"Topic: {topic}" if topic else ""
-        if content:
-            user_content += f"\n\nSource content to create flashcards from:\n{content[:5000]}"
-
-        result = await llm.ainvoke([system, HMsg(content=user_content)])
-        raw = result.content.strip()
-
-        # Strip markdown code blocks if present (```json ... ``` or ``` ... ```)
-        if raw.startswith("```"):
-            # Remove opening ``` (optionally with language tag) and closing ```
-            raw = re.sub(r'^```(?:json)?\s*\n?', '', raw)
-            raw = re.sub(r'\n?```\s*$', '', raw)
-            raw = raw.strip()
-
-        # Parse JSON — the LLM might return a bare array [...] or an object {"cards": [...]}
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            # Fallback: try the safe parser
-            parsed = _safe_json_loads(raw)
-
-        if isinstance(parsed, list):
-            cards = parsed
-        elif isinstance(parsed, dict):
-            cards = parsed.get("cards", parsed.get("flashcards", []))
-            if not isinstance(cards, list):
-                cards = []
-        else:
-            cards = []
-
-        return _attach_cost({"cards": cards, "topic": topic})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Flashcard generation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ─────────────────────── Code Playground ───────────────────────────────
-
-@app.post("/api/code-playground/run")
-async def run_code_playground(request: dict):
-    """
-    Execute code in a sandboxed environment (Python only for safety).
-    Body: { "code": str, "language": str, "stdin"?: str }
-    Returns: { stdout, stderr, exitCode, executionTime }
-    """
-    import subprocess
-    import tempfile
-    import time
-
-    try:
-        start_tracking()
-        code = request.get("code", "").strip()
-        language = request.get("language", "python").lower()
-        stdin_data = request.get("stdin", "")
-
-        if not code:
-            raise HTTPException(status_code=400, detail="No code provided")
-
-        if language not in ("python", "javascript", "js"):
-            raise HTTPException(status_code=400, detail=f"Language '{language}' execution not supported. Use 'python' or 'javascript'.")
-
-        start_time = time.time()
-
-        if language == "python":
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                f.flush()
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, f.name],
-                        capture_output=True, text=True,
-                        timeout=10, input=stdin_data,
-                    )
-                    elapsed = round((time.time() - start_time) * 1000)
-                    return _attach_cost({
-                        "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
-                        "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
-                        "exitCode": proc.returncode,
-                        "executionTime": elapsed,
-                    })
-                finally:
-                    import os
-                    os.unlink(f.name)
-
-        elif language in ("javascript", "js"):
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-                f.write(code)
-                f.flush()
-                try:
-                    proc = subprocess.run(
-                        ["node", f.name],
-                        capture_output=True, text=True,
-                        timeout=10, input=stdin_data,
-                    )
-                    elapsed = round((time.time() - start_time) * 1000)
-                    return _attach_cost({
-                        "stdout": proc.stdout[-5000:] if len(proc.stdout) > 5000 else proc.stdout,
-                        "stderr": proc.stderr[-2000:] if len(proc.stderr) > 2000 else proc.stderr,
-                        "exitCode": proc.returncode,
-                        "executionTime": elapsed,
-                    })
-                finally:
-                    import os
-                    os.unlink(f.name)
-
-    except subprocess.TimeoutExpired:
-        return _attach_cost({"stdout": "", "stderr": "Execution timed out (10s limit)", "exitCode": 1, "executionTime": 10000})
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail=f"Runtime for '{language}' not found on server")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Code execution error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/code-playground/explain")
-async def explain_code(request: dict):
-    """
-    AI explains code step-by-step, debugs errors, or generates exercises.
-    Body: { "code": str, "language": str, "action": "explain"|"debug"|"exercise"|"optimize", "error"?: str }
-    """
-    try:
-        start_tracking()
-        code = request.get("code", "").strip()
-        language = request.get("language", "python")
-        action = request.get("action", "explain")
-        error = request.get("error", "")
-
-        if not code:
-            raise HTTPException(status_code=400, detail="No code provided")
-
-        from langchain_core.messages import SystemMessage, HumanMessage as HMsg
-        llm = _get_code_ai_llm()
-
-        prompts = {
-            "explain": f"""You are a coding tutor. Explain the following {language} code step-by-step.
-- Walk through each line/block and explain what it does.
-- Highlight key concepts, patterns, and potential gotchas.
-- Rate the code complexity (beginner/intermediate/advanced).
-- Use markdown with syntax-highlighted code blocks.""",
-            "debug": f"""You are a debugging expert. The student's {language} code has an error.
-- Identify the bug(s) and explain why they occur.
-- Show the corrected code with explanations.
-- Suggest how to avoid similar bugs in the future.
-Error message: {error}""",
-            "exercise": f"""You are a coding exercise generator. Based on this {language} code, create:
-1. Three practice exercises of increasing difficulty (easy, medium, hard).
-2. Each with: title, description, starter code, expected output, hints.
-3. Return as structured markdown with clear sections.""",
-            "optimize": f"""You are a code optimization expert. Review this {language} code and:
-1. Identify performance issues or anti-patterns.
-2. Show the optimized version with explanations.
-3. Compare time/space complexity before and after.
-4. Suggest best practices.""",
-        }
-
-        system = SystemMessage(content=prompts.get(action, prompts["explain"]))
-        user_msg = f"```{language}\n{code}\n```"
-
-        result = await llm.ainvoke([system, HMsg(content=user_msg)])
-        return _attach_cost({"result": result.content, "action": action})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Code explain error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

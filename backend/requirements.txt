@@ -50,6 +50,7 @@ loguru==0.7.2
 # Testing
 pytest==8.0.0
 pytest-asyncio==0.23.5
+pytest-cov>=4.1.0
 
 # Code Runner
 flask>=3.0.0

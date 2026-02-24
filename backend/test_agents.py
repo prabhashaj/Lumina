@@ -152,14 +152,5 @@ class TestDataModels:
         assert intent.confidence == 0.9
 
 
-# Pytest configuration
-def pytest_configure(config):
-    """Configure pytest with custom markers"""
-    config.addinivalue_line("markers", "unit: Unit tests")
-    config.addinivalue_line("markers", "integration: Integration tests")
-    config.addinivalue_line("markers", "asyncio: Async tests")
-
-
 if __name__ == "__main__":
-    # Run tests
     pytest.main([__file__, "-v"])

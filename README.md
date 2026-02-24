@@ -12,8 +12,7 @@ Production-grade, multi-agent learning platform that researches the web, synthes
 - Personalized learning assessments and adaptive plans
 - Video lecture slide generation with narration and images
 - Doubt solver for image-based questions and follow-up chat
-- Flashcard generation and spaced-repetition storage
-- Code playground (run and explain) endpoints
+
 
 ## Modes and Features
 
@@ -51,14 +50,6 @@ Production-grade, multi-agent learning platform that researches the web, synthes
 ### Guide Chatbot
 - Context-aware tutor for exam prep, personalized learning, and video lecture modes
 - Short, structured responses with LaTeX support
-
-### Flashcards
-- Flashcard generation endpoint
-- SM-2 spaced repetition scheduling and local storage
-
-### Code Playground
-- Run Python and JavaScript code in a sandboxed subprocess
-- Explain, debug, optimize, or generate exercises with an LLM
 
 ## Architecture Overview
 
@@ -215,13 +206,6 @@ Doubt solver:
 Guide chatbot:
 - POST /api/guide/chat
 
-Flashcards:
-- POST /api/flashcards/generate
-
-Code playground:
-- POST /api/code-playground/run
-- POST /api/code-playground/explain
-
 Code tutor:
 - POST /api/code-ai/chat
 
@@ -232,7 +216,6 @@ The frontend persists state in localStorage:
 - Research chat history
 - Exam prep sessions and progress
 - Personalized learning sessions and progress
-- Flashcard decks and spaced repetition schedules
 
 ## Logging and Cost Tracking
 
@@ -260,4 +243,4 @@ See SETUP.md and DEVELOPMENT.md for details.
 
 - Redis and vector DBs are configured but not wired into the current flow
 - Auth is localStorage-based and is not a production auth system
-- Code playground uses subprocess and should be sandboxed further for production
+

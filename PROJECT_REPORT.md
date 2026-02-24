@@ -23,14 +23,10 @@ In scope
 - Video lecture slide generation with narration
 - Doubt solving from images
 - Guide chatbot for contextual tutoring
-- Flashcard generation and spaced repetition
-- Code playground endpoints for execution and explanation
-
 Out of scope (current version)
 - Production-grade authentication and user accounts
 - Full database persistence (uses localStorage on frontend)
 - Continuous evaluation pipelines or A/B testing
-- Production-grade sandboxing for code execution
 
 ## 3) System Architecture
 
@@ -170,22 +166,6 @@ Context-aware assistant for:
 - Personalized learning: guidance on plan topics and progress
 - Video lectures: clarification of slide content
 
-### 4.7 Flashcards
-
-Workflow
-1) User provides a topic or content.
-2) Backend generates flashcards with difficulty scores.
-3) Frontend stores decks and schedules reviews via SM-2 algorithm.
-
-### 4.8 Code Playground
-
-Capabilities
-- Execute Python or JavaScript code in subprocesses.
-- Explain, debug, optimize, or generate exercises via LLM.
-
-Notes
-- Should be further sandboxed for production.
-
 ## 5) Data and State Management
 
 Frontend storage (localStorage)
@@ -193,8 +173,6 @@ Frontend storage (localStorage)
 - Research chat history
 - Exam prep sessions
 - Personalized learning sessions
-- Flashcard decks and SM-2 review metadata
-
 Backend storage
 - In-memory search cache (SearchCache)
 - Log file output and cost tracking log
