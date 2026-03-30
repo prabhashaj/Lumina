@@ -5,21 +5,27 @@ entry point and generates human-readable reports.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))          # backend/
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))   # workspace root
+sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import asyncio
+import logging
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
-from loguru import logger
+try:
+    from .pedagogical_evaluator import PedagogicalEvaluator
+    from .semantic_evaluator import SemanticEvaluator
+    from .structural_evaluator import StructuralEvaluator
+except ImportError:
+    from pedagogical_evaluator import PedagogicalEvaluator
+    from semantic_evaluator import SemanticEvaluator
+    from structural_evaluator import StructuralEvaluator
 
-from .semantic_evaluator import SemanticEvaluator
-from .pedagogical_evaluator import PedagogicalEvaluator
-from .structural_evaluator import StructuralEvaluator
+
+logger = logging.getLogger(__name__)
 
 
-# Minimum acceptable score per dimension
 THRESHOLDS = {
     "semantic": 0.70,
     "pedagogical": 0.70,
@@ -29,25 +35,11 @@ THRESHOLDS = {
 
 
 class EvaluationDashboard:
-    """
-    Central hub that runs all three evaluators and produces
-    aggregated quality reports for teaching responses.
-
-    Usage:
-        dashboard = EvaluationDashboard()
-        result = await dashboard.evaluate(question, response_dict, sources, difficulty)
-        print(dashboard.generate_report())
-    """
-
     def __init__(self):
         self.semantic = SemanticEvaluator()
         self.pedagogical = PedagogicalEvaluator()
         self.structural = StructuralEvaluator()
-        self._history: List[Dict] = []
-
-    # ------------------------------------------------------------------
-    # Main evaluation entry point
-    # ------------------------------------------------------------------
+        self._history: List[Dict[str, Any]] = []
 
     async def evaluate(
         self,
@@ -56,29 +48,9 @@ class EvaluationDashboard:
         sources: List[str],
         difficulty_level: str = "intermediate",
     ) -> Dict[str, Any]:
-        """
-        Run all three evaluators concurrently and return a complete result dict.
-
-        Args:
-            question:         The student's original question
-            response_dict:    The parsed teaching response (keys: tldr, explanation,
-                              analogy, examples, practice_questions, sources)
-            sources:          List of plain-text source strings used to generate the response
-            difficulty_level: beginner | intermediate | advanced
-
-        Returns:
-            Dict with semantic_scores, pedagogical_scores, structural_scores,
-            overall_score, pass (bool), timestamp, and a human-readable summary.
-        """
         timestamp = datetime.now().isoformat()
-
-        # Run LLM-based evaluators concurrently, structural is sync
         semantic_task = asyncio.create_task(
-            self.semantic.evaluate_teaching_response(
-                question,
-                response_dict.get("explanation", ""),
-                sources,
-            )
+            self.semantic.evaluate_teaching_response(question, response_dict.get("explanation", ""), sources)
         )
         pedagogical_task = asyncio.create_task(
             self.pedagogical.evaluate_teaching_quality(
@@ -94,26 +66,22 @@ class EvaluationDashboard:
         structural_task = asyncio.create_task(
             self.structural.evaluate_teaching_response_structure(response_dict)
         )
-
         semantic_scores, pedagogical_scores, structural_scores = await asyncio.gather(
             semantic_task, pedagogical_task, structural_task
         )
 
-        # Weighted overall: semantic 40%, pedagogical 40%, structural 20%
         overall = round(
             semantic_scores["overall_semantic_score"] * 0.40
             + pedagogical_scores["overall_pedagogical_score"] * 0.40
             + structural_scores["overall_structural_score"] * 0.20,
             4,
         )
-
         passed = (
             semantic_scores["overall_semantic_score"] >= THRESHOLDS["semantic"]
             and pedagogical_scores["overall_pedagogical_score"] >= THRESHOLDS["pedagogical"]
             and structural_scores["overall_structural_score"] >= THRESHOLDS["structural"]
             and overall >= THRESHOLDS["overall"]
         )
-
         result = {
             "timestamp": timestamp,
             "question": question,
@@ -123,33 +91,25 @@ class EvaluationDashboard:
             "structural_scores": structural_scores,
             "overall_score": overall,
             "pass": passed,
-            "summary": self._build_summary(
-                overall, passed, semantic_scores, pedagogical_scores, structural_scores
-            ),
+            "summary": self._build_summary(overall, passed, semantic_scores, pedagogical_scores, structural_scores),
         }
-
         self._history.append(result)
         logger.info(
-            f"Evaluation complete | overall={overall:.2f} | pass={passed} | "
-            f"question='{question[:60]}...'"
+            "Evaluation complete | overall=%.2f | pass=%s | question='%s...'",
+            overall,
+            passed,
+            question[:60],
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Reporting
-    # ------------------------------------------------------------------
-
     def generate_report(self) -> str:
-        """Print a human-readable summary of all evaluations so far."""
         if not self._history:
             return "No evaluations yet."
-
         n = len(self._history)
         passed = sum(1 for e in self._history if e["pass"])
 
-        avg = lambda key_path: sum(
-            self._nested_get(e, key_path) for e in self._history
-        ) / n
+        def avg(key_path: str) -> float:
+            return sum(self._nested_get(e, key_path) for e in self._history) / n
 
         lines = [
             "",
@@ -157,52 +117,50 @@ class EvaluationDashboard:
             "      LLM OUTPUT EVALUATION REPORT",
             "=" * 52,
             f"  Total Evaluations : {n}",
-            f"  Pass Rate         : {(passed/n)*100:.1f}%  ({passed}/{n})",
+            f"  Pass Rate         : {(passed / n) * 100:.1f}%  ({passed}/{n})",
             "",
             "  Average Scores (0-1 scale):",
             f"    Semantic Accuracy   : {avg('semantic_scores.overall_semantic_score'):.3f}  (weight 40%)",
-            f"      ├─ Factual Accuracy     : {avg('semantic_scores.factual_accuracy'):.3f}",
-            f"      ├─ Logical Coherence    : {avg('semantic_scores.logical_coherence'):.3f}",
-            f"      ├─ Concept Coverage     : {avg('semantic_scores.concept_coverage'):.3f}",
-            f"      ├─ Misconception Handle : {avg('semantic_scores.misconception_handling'):.3f}",
-            f"      └─ Evidence-Based       : {avg('semantic_scores.evidence_based'):.3f}",
+            f"      |- Factual Accuracy     : {avg('semantic_scores.factual_accuracy'):.3f}",
+            f"      |- Logical Coherence    : {avg('semantic_scores.logical_coherence'):.3f}",
+            f"      |- Concept Coverage     : {avg('semantic_scores.concept_coverage'):.3f}",
+            f"      |- Misconception Handle : {avg('semantic_scores.misconception_handling'):.3f}",
+            f"      '- Evidence-Based       : {avg('semantic_scores.evidence_based'):.3f}",
             "",
             f"    Pedagogical Quality : {avg('pedagogical_scores.overall_pedagogical_score'):.3f}  (weight 40%)",
-            f"      ├─ Clarity             : {avg('pedagogical_scores.clarity'):.3f}",
-            f"      ├─ Analogy Quality     : {avg('pedagogical_scores.analogy_quality'):.3f}",
-            f"      ├─ Example Quality     : {avg('pedagogical_scores.example_quality'):.3f}",
-            f"      ├─ Practice Questions  : {avg('pedagogical_scores.practice_quality'):.3f}",
-            f"      ├─ Scaffolding         : {avg('pedagogical_scores.scaffolding'):.3f}",
-            f"      ├─ Engagement          : {avg('pedagogical_scores.engagement'):.3f}",
-            f"      └─ Difficulty Match    : {avg('pedagogical_scores.difficulty_match'):.3f}",
+            f"      |- Clarity             : {avg('pedagogical_scores.clarity'):.3f}",
+            f"      |- Analogy Quality     : {avg('pedagogical_scores.analogy_quality'):.3f}",
+            f"      |- Example Quality     : {avg('pedagogical_scores.example_quality'):.3f}",
+            f"      |- Practice Questions  : {avg('pedagogical_scores.practice_quality'):.3f}",
+            f"      |- Scaffolding         : {avg('pedagogical_scores.scaffolding'):.3f}",
+            f"      |- Engagement          : {avg('pedagogical_scores.engagement'):.3f}",
+            f"      '- Difficulty Match    : {avg('pedagogical_scores.difficulty_match'):.3f}",
             "",
             f"    Structural Quality  : {avg('structural_scores.overall_structural_score'):.3f}  (weight 20%)",
-            f"      ├─ Completeness        : {avg('structural_scores.completeness'):.3f}",
-            f"      ├─ TL;DR Quality       : {avg('structural_scores.tldr_quality'):.3f}",
-            f"      ├─ Length              : {avg('structural_scores.length_appropriateness'):.3f}",
-            f"      ├─ Markdown Quality    : {avg('structural_scores.markdown_quality'):.3f}",
-            f"      └─ Citation Quality    : {avg('structural_scores.citation_quality'):.3f}",
+            f"      |- Completeness        : {avg('structural_scores.completeness'):.3f}",
+            f"      |- TL;DR Quality       : {avg('structural_scores.tldr_quality'):.3f}",
+            f"      |- Length              : {avg('structural_scores.length_appropriateness'):.3f}",
+            f"      |- Markdown Quality    : {avg('structural_scores.markdown_quality'):.3f}",
+            f"      '- Citation Quality    : {avg('structural_scores.citation_quality'):.3f}",
             "",
-            f"  ── OVERALL SCORE : {avg('overall_score'):.3f} ──",
+            f"  -- OVERALL SCORE : {avg('overall_score'):.3f} --",
             "",
             "  Thresholds:",
-            "    ✓ EXCELLENT : 0.85 – 1.00",
-            "    ~ GOOD      : 0.70 – 0.84",
-            "    ✗ NEEDS WORK: < 0.70",
+            "    EXCELLENT : 0.85 - 1.00",
+            "    GOOD      : 0.70 - 0.84",
+            "    NEEDS WORK: < 0.70",
             "=" * 52,
             "",
         ]
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def _nested_get(self, d: dict, dotted_key: str) -> float:
-        keys = dotted_key.split(".")
-        for k in keys:
-            d = d.get(k, {})
-        return float(d) if isinstance(d, (int, float)) else 0.0
+        current: Any = d
+        for key in dotted_key.split("."):
+            if not isinstance(current, dict):
+                return 0.0
+            current = current.get(key, 0.0)
+        return float(current) if isinstance(current, (int, float)) else 0.0
 
     def _build_summary(
         self,
@@ -212,11 +170,7 @@ class EvaluationDashboard:
         pedagogical: dict,
         structural: dict,
     ) -> str:
-        label = (
-            "EXCELLENT" if overall >= 0.85
-            else "GOOD" if overall >= 0.70
-            else "NEEDS WORK"
-        )
+        label = "EXCELLENT" if overall >= 0.85 else "GOOD" if overall >= 0.70 else "NEEDS WORK"
         weak = []
         for name, score in [
             ("Factual Accuracy", semantic.get("factual_accuracy", 0)),
@@ -228,8 +182,45 @@ class EvaluationDashboard:
         ]:
             if score < 0.65:
                 weak.append(f"{name} ({score:.2f})")
-
         summary = f"Overall: {overall:.2f} [{label}] | Pass: {passed}"
         if weak:
             summary += f" | Weaknesses: {', '.join(weak)}"
         return summary
+
+
+async def _demo() -> None:
+    dashboard = EvaluationDashboard()
+    response = {
+        "tldr": "Plants use sunlight to make glucose from water and carbon dioxide.",
+        "explanation": "## Photosynthesis\n\nPlants capture sunlight using chlorophyll. They use that energy to convert water and carbon dioxide into glucose, and oxygen is released as a by-product.\n\n- Light absorption starts the process.\n- Chemical reactions store energy in glucose.\n",
+        "analogy": "Think of a leaf like a solar-powered kitchen that makes sugar.",
+        "examples": [
+            "Houseplants lean toward bright windows because light powers growth.",
+            "Pond plants make oxygen bubbles when placed in sunlight.",
+        ],
+        "practice_questions": [
+            "Why is chlorophyll important?",
+            "How do sunlight and water contribute to photosynthesis?",
+        ],
+        "sources": [
+            {
+                "title": "Biology reference",
+                "url": "https://example.com/photosynthesis",
+                "snippet": "Photosynthesis occurs in chloroplasts and produces glucose and oxygen.",
+                "domain": "example.com",
+            }
+        ],
+    }
+    result = await dashboard.evaluate(
+        question="How does photosynthesis work?",
+        response_dict=response,
+        sources=[response["sources"][0]["snippet"]],
+        difficulty_level="intermediate",
+    )
+    print(result["summary"])
+    print()
+    print(dashboard.generate_report())
+
+
+if __name__ == "__main__":
+    asyncio.run(_demo())

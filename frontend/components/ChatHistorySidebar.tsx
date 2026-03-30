@@ -1,25 +1,25 @@
 'use client'
 
 import { useState } from 'react'
-import { MessageSquare, Plus, Trash2, Clock } from 'lucide-react'
-import { ChatSession } from '@/lib/types'
+import { MessageSquare, Plus, Trash2, Clock, GraduationCap, User, Presentation, Camera } from 'lucide-react'
+import { UnifiedHistoryItem } from '@/lib/types'
 import { groupSessionsByDate } from '@/lib/chatHistory'
 
 interface ChatHistorySidebarProps {
   isOpen: boolean
   onClose: () => void
-  sessions: ChatSession[]
-  activeSessionId: string | null
-  onSelectSession: (sessionId: string) => void
+  sessions: UnifiedHistoryItem[]
+  activeItemId: string | null
+  onSelectSession: (item: UnifiedHistoryItem) => void
   onNewChat: () => void
-  onDeleteSession: (sessionId: string) => void
+  onDeleteSession: (item: UnifiedHistoryItem) => void
 }
 
 export default function ChatHistorySidebar({
   isOpen,
   onClose,
   sessions,
-  activeSessionId,
+  activeItemId,
   onSelectSession,
   onNewChat,
   onDeleteSession,
@@ -29,15 +29,31 @@ export default function ChatHistorySidebar({
 
   const grouped = groupSessionsByDate(sessions)
 
-  const handleDelete = (e: React.MouseEvent, sessionId: string) => {
+  const handleDelete = (e: React.MouseEvent, item: UnifiedHistoryItem) => {
     e.stopPropagation()
-    if (confirmDeleteId === sessionId) {
-      onDeleteSession(sessionId)
+    if (confirmDeleteId === item.id) {
+      onDeleteSession(item)
       setConfirmDeleteId(null)
     } else {
-      setConfirmDeleteId(sessionId)
+      setConfirmDeleteId(item.id)
       setTimeout(() => setConfirmDeleteId(null), 3000)
     }
+  }
+
+  const modeLabel: Record<UnifiedHistoryItem['mode'], string> = {
+    chat: 'Research',
+    'exam-prep': 'Exam Prep',
+    personalized: 'Personalized',
+    'video-lecture': 'Video Lecture',
+    'doubt-solver': 'Doubt Solver',
+  }
+
+  const modeIcon = (mode: UnifiedHistoryItem['mode']) => {
+    if (mode === 'chat') return <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+    if (mode === 'exam-prep') return <GraduationCap className="w-3.5 h-3.5 flex-shrink-0" />
+    if (mode === 'personalized') return <User className="w-3.5 h-3.5 flex-shrink-0" />
+    if (mode === 'video-lecture') return <Presentation className="w-3.5 h-3.5 flex-shrink-0" />
+    return <Camera className="w-3.5 h-3.5 flex-shrink-0" />
   }
 
   return (
@@ -87,7 +103,7 @@ export default function ChatHistorySidebar({
                     <div
                       key={session.id}
                       onClick={() => {
-                        onSelectSession(session.id)
+                        onSelectSession(session)
                       }}
                       onMouseEnter={() => setHoveredId(session.id)}
                       onMouseLeave={() => {
@@ -95,20 +111,25 @@ export default function ChatHistorySidebar({
                         if (confirmDeleteId === session.id) setConfirmDeleteId(null)
                       }}
                       className={`group relative flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 text-sm ${
-                        activeSessionId === session.id
+                        activeItemId === session.id
                           ? 'bg-[hsl(73,31%,45%)]/10 text-foreground border border-[hsl(73,31%,45%)]/15'
                           : 'hover:bg-muted/25 text-foreground/60 hover:text-foreground/80 border border-transparent'
                       }`}
                     >
-                      <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
-                        activeSessionId === session.id ? 'text-[hsl(73,31%,45%)]' : 'text-muted-foreground/40'
-                      }`} />
-                      <span className="flex-1 truncate text-[13px]">{session.title}</span>
-                      
+                      <span className={activeItemId === session.id ? 'text-[hsl(73,31%,45%)]' : 'text-muted-foreground/40'}>
+                        {modeIcon(session.mode)}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="block truncate text-[13px]">{session.title}</span>
+                        <span className="block truncate text-[10px] text-muted-foreground/50">
+                          {modeLabel[session.mode]}{session.subtitle ? ` • ${session.subtitle}` : ''}
+                        </span>
+                      </div>
+
                       {/* Delete button */}
                       {hoveredId === session.id && (
                         <button
-                          onClick={(e) => handleDelete(e, session.id)}
+                          onClick={(e) => handleDelete(e, session)}
                           className={`flex-shrink-0 p-1 rounded-lg transition-all duration-200 ${
                             confirmDeleteId === session.id
                               ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'

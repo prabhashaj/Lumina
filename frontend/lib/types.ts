@@ -227,3 +227,33 @@ export interface GuideMessage {
   timestamp: Date
   isLoading?: boolean
 }
+
+export type HistoryMode = 'chat' | 'exam-prep' | 'personalized' | 'video-lecture' | 'doubt-solver'
+
+export interface UnifiedHistoryItem {
+  id: string
+  mode: HistoryMode
+  sessionId: string
+  title: string
+  subtitle?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DoubtSolverSession {
+  id: string
+  title: string
+  messages: DoubtMessage[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VideoLectureHistorySession {
+  id: string
+  topic: string
+  title: string
+  presentation: Presentation | null
+  createdAt: string
+  updatedAt: string
+  status: 'idle' | 'generating' | 'ready' | 'error'
+}

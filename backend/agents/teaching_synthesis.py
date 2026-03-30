@@ -31,28 +31,28 @@ class TeachingSynthesisAgent:
             logger.info("Teaching Synthesis: Using Mistral Small via OpenRouter")
             self.llm = ChatOpenAI(
                 model=settings.openrouter_model,
-                temperature=0.7,
+                temperature=0.4,
                 api_key=settings.openrouter_api_key,
                 base_url="https://openrouter.ai/api/v1",
-                max_tokens=8000  # Large context for comprehensive teaching content
+                max_tokens=3000
             )
             # Set backup to Mistral API if available
             if settings.mistral_api_key:
                 self.backup_llm = ChatOpenAI(
                     model=settings.mistral_model,
-                    temperature=0.7,
+                    temperature=0.4,
                     api_key=settings.mistral_api_key,
                     base_url="https://api.mistral.ai/v1",
-                    max_tokens=8000
+                    max_tokens=3000
                 )
         elif settings.mistral_api_key:
             logger.info("Teaching Synthesis: Using Mistral Medium via Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
-                temperature=0.7,
+                temperature=0.4,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
-                max_tokens=8000
+                max_tokens=3000
             )
         
         if not self.llm:
@@ -144,10 +144,11 @@ class TeachingSynthesisAgent:
             # Parse the structured response
             parsed = self._parse_teaching_content(content)
             
-            # Generate practice questions if not present or ensure 3-5 unique questions
+            # Avoid extra LLM round-trip: if model returns too few questions, fill quickly.
             if not parsed.get("practice_questions") or len(parsed.get("practice_questions", [])) < 3:
-                parsed["practice_questions"] = await self._generate_practice_questions(
-                    question, intent.difficulty_level.value
+                parsed["practice_questions"] = self._build_fallback_questions(
+                    question,
+                    parsed.get("practice_questions", []),
                 )
             else:
                 # Aggressive deduplication with normalized comparison
@@ -213,8 +214,28 @@ class TeachingSynthesisAgent:
         """Format research content with source references"""
         formatted = []
         for idx, (content, source) in enumerate(zip(content_list, sources[:len(content_list)])):
-            formatted.append(f"[{idx + 1}] {source.domain}: {content[:2000]}")
+            formatted.append(f"[{idx + 1}] {source.domain}: {content[:1200]}")
         return "\n\n".join(formatted)
+
+    def _build_fallback_questions(self, question: str, existing: List[str]) -> List[str]:
+        """Build fast deterministic fallback questions without a second LLM call."""
+        seed = [q for q in existing if q and len(q.strip()) > 10]
+        candidates = [
+            f"What is the core idea behind {question}?",
+            f"How would you apply {question} in a practical scenario?",
+            f"Why is {question} important, and where does it fail?",
+            f"What would change if a key assumption in {question} was removed?",
+        ]
+
+        seen = {q.lower().strip(' ?.!,') for q in seed}
+        for c in candidates:
+            n = c.lower().strip(' ?.!,')
+            if n not in seen:
+                seed.append(c)
+                seen.add(n)
+            if len(seed) >= 4:
+                break
+        return seed[:4]
     
     def _format_image_references(self, images: List[ImageData]) -> str:
         """Format image references for teaching integration (no VLM analysis needed)"""

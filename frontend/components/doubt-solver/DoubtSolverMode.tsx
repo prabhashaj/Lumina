@@ -20,8 +20,25 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { doubtSolverChat } from '@/lib/api'
 import { DoubtMessage } from '@/lib/types'
+import {
+  createDoubtSolverSession,
+  loadDoubtSolverSessions,
+  saveDoubtSolverSession,
+  serializeDoubtMessages,
+} from '@/lib/doubtSolverStorage'
 
-export default function DoubtSolverMode() {
+interface DoubtSolverModeProps {
+  selectedSessionId?: string | null
+  onActiveSessionChange?: (sessionId: string | null) => void
+  onHistoryChanged?: () => void
+}
+
+export default function DoubtSolverMode({
+  selectedSessionId,
+  onActiveSessionChange,
+  onHistoryChanged,
+}: DoubtSolverModeProps) {
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<DoubtMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -31,14 +48,53 @@ export default function DoubtSolverMode() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const messagesRef = useRef<DoubtMessage[]>([])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
+    messagesRef.current = messages
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    if (selectedSessionId === undefined) return
+    if (selectedSessionId === null) {
+      setSessionId(null)
+      setMessages([])
+      return
+    }
+    const target = loadDoubtSolverSessions().find((s) => s.id === selectedSessionId)
+    if (target) {
+      setSessionId(target.id)
+      setMessages(serializeDoubtMessages(target.messages))
+      onActiveSessionChange?.(target.id)
+    }
+  }, [selectedSessionId, onActiveSessionChange])
+
+  const ensureSession = useCallback(() => {
+    if (sessionId) return sessionId
+    const fresh = createDoubtSolverSession()
+    saveDoubtSolverSession(fresh)
+    setSessionId(fresh.id)
+    onActiveSessionChange?.(fresh.id)
+    setTimeout(() => onHistoryChanged?.(), 0)
+    return fresh.id
+  }, [sessionId, onActiveSessionChange, onHistoryChanged])
+
+  const persistSession = useCallback((targetSessionId: string, nextMessages: DoubtMessage[]) => {
+    const existing = loadDoubtSolverSessions().find((s) => s.id === targetSessionId)
+    saveDoubtSolverSession({
+      id: targetSessionId,
+      title: existing?.title || 'New Doubt Chat',
+      messages: nextMessages,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    setTimeout(() => onHistoryChanged?.(), 0)
+  }, [onHistoryChanged])
 
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -74,6 +130,8 @@ export default function DoubtSolverMode() {
     e?.preventDefault()
     if ((!input.trim() && !pendingImage) || isLoading) return
 
+    const currentSessionId = ensureSession()
+
     const userMessage: DoubtMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -81,8 +139,6 @@ export default function DoubtSolverMode() {
       timestamp: new Date(),
       imagePreview: pendingImagePreview || undefined,
     }
-
-    setMessages(prev => [...prev, userMessage])
 
     let imageBase64: string | undefined
     let imageType: string | undefined
@@ -95,13 +151,16 @@ export default function DoubtSolverMode() {
     setError(null)
 
     const assistantId = (Date.now() + 1).toString()
-    setMessages(prev => [...prev, {
+    const assistantMessage: DoubtMessage = {
       id: assistantId,
       role: 'assistant',
       content: '',
       timestamp: new Date(),
       isLoading: true,
-    }])
+    }
+
+    const optimisticMessages = [...messagesRef.current, userMessage, assistantMessage]
+    setMessages(optimisticMessages)
 
     try {
       if (currentImage) {
@@ -123,25 +182,30 @@ export default function DoubtSolverMode() {
         imageType
       )
 
-      setMessages(prev => prev.map(m =>
+      let updated = messagesRef.current.map(m =>
         m.id === assistantId
           ? { ...m, content: result.response, isLoading: false, imageContext: result.image_context || undefined }
           : m
-      ))
+      )
 
       if (result.image_context) {
-        setMessages(prev => prev.map(m =>
+        updated = updated.map(m =>
           m.id === userMessage.id
             ? { ...m, imageContext: result.image_context || undefined }
             : m
-        ))
+        )
       }
+
+      setMessages(updated)
+      persistSession(currentSessionId, updated)
     } catch (err: any) {
-      setMessages(prev => prev.map(m =>
+      const updated = messagesRef.current.map(m =>
         m.id === assistantId
           ? { ...m, content: 'Sorry, I encountered an error. Please try again.', isLoading: false }
           : m
-      ))
+      )
+      setMessages(updated)
+      persistSession(currentSessionId, updated)
       setError(err.message || 'Failed to get response')
     } finally {
       setIsLoading(false)
@@ -150,10 +214,12 @@ export default function DoubtSolverMode() {
 
   const handleReset = () => {
     setMessages([])
+    setSessionId(null)
     setInput('')
     setPendingImage(null)
     setPendingImagePreview(null)
     setError(null)
+    onActiveSessionChange?.(null)
   }
 
   const suggestions = [

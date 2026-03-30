@@ -18,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" data-scroll-behavior="smooth">
       <body className={`${inter.className} ${caveat.variable} ${patrickHand.variable}`}>
         <AuthProvider>{children}</AuthProvider>
       </body>

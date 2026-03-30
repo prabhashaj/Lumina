@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { ExamPrepSession, TopicContent, QuizQuestion, Chapter } from '@/lib/types'
 import { generateRoadmap, streamTopicContent, generateQuiz } from '@/lib/api'
 import {
@@ -27,7 +27,17 @@ import {
 
 type PrepView = 'landing' | 'roadmap' | 'topic' | 'quiz'
 
-export default function ExamPrepMode() {
+interface ExamPrepModeProps {
+  selectedSessionId?: string | null
+  onActiveSessionChange?: (sessionId: string | null) => void
+  onHistoryChanged?: () => void
+}
+
+export default function ExamPrepMode({
+  selectedSessionId,
+  onActiveSessionChange,
+  onHistoryChanged,
+}: ExamPrepModeProps) {
   const [view, setView] = useState<PrepView>('landing')
   const [session, setSession] = useState<ExamPrepSession | null>(null)
   const [savedSessions, setSavedSessions] = useState<ExamPrepSession[]>(() => loadExamPrepSessions())
@@ -45,6 +55,20 @@ export default function ExamPrepMode() {
   const [subjectInput, setSubjectInput] = useState('')
   const [isCreatingRoadmap, setIsCreatingRoadmap] = useState(false)
 
+  useEffect(() => {
+    if (selectedSessionId === undefined) return
+    if (selectedSessionId === null) {
+      setSession(null)
+      setView('landing')
+      return
+    }
+    const target = loadExamPrepSessions().find((s) => s.id === selectedSessionId)
+    if (target) {
+      setSession(target)
+      setView('roadmap')
+    }
+  }, [selectedSessionId])
+
   // Create new exam prep session
   const handleCreateRoadmap = async () => {
     if (!subjectInput.trim() || isCreatingRoadmap) return
@@ -58,6 +82,8 @@ export default function ExamPrepMode() {
       setSavedSessions(loadExamPrepSessions())
       setView('roadmap')
       setSubjectInput('')
+      onActiveSessionChange?.(newSession.id)
+      onHistoryChanged?.()
     } catch (err) {
       console.error('Roadmap generation failed:', err)
       alert('Failed to generate roadmap. Please try again.')
@@ -70,15 +96,18 @@ export default function ExamPrepMode() {
   const handleLoadSession = (s: ExamPrepSession) => {
     setSession(s)
     setView('roadmap')
+    onActiveSessionChange?.(s.id)
   }
 
   // Delete a session
   const handleDeleteSession = (id: string) => {
     deleteExamPrepSession(id)
     setSavedSessions(loadExamPrepSessions())
+    onHistoryChanged?.()
     if (session?.id === id) {
       setSession(null)
       setView('landing')
+      onActiveSessionChange?.(null)
     }
   }
 
@@ -171,6 +200,7 @@ export default function ExamPrepMode() {
                 setSession(doneSession)
                 saveExamPrepSession(doneSession)
                 setSavedSessions(loadExamPrepSessions())
+                onHistoryChanged?.()
                 break
             }
           }
@@ -189,6 +219,7 @@ export default function ExamPrepMode() {
         const revertedSession = { ...session, chapters: revertedChapters }
         setSession(revertedSession)
         saveExamPrepSession(revertedSession)
+        onHistoryChanged?.()
       } finally {
         setIsGeneratingContent(false)
       }
@@ -241,6 +272,7 @@ export default function ExamPrepMode() {
     setSession(updatedSession)
     saveExamPrepSession(updatedSession)
     setSavedSessions(loadExamPrepSessions())
+    onHistoryChanged?.()
   }
 
   // Retry quiz

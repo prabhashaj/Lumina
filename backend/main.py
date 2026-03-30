@@ -193,7 +193,7 @@ async def health_check():
         "status": "healthy",
         "orchestrator": orchestrator is not None,
         "settings": {
-            "llm_model": settings.primary_llm_model,
+            "llm_model": settings.openrouter_model or settings.mistral_model,
             "max_search_results": settings.max_search_results,
             "max_images": settings.max_images_per_response
         }
@@ -232,12 +232,51 @@ def _get_code_ai_llm():
 # ─── Doubt Solver (Optimized with OpenRouter Free Router) ───────────────────
 
 _doubt_solver_llm = None
+_doubt_solver_backup_llm = None
+
+
+def _is_credit_or_payment_error(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return "402" in error_text or "credits" in lowered or "payment" in lowered
+
+
+def _extract_affordable_tokens(error_text: str):
+    import re as _re
+
+    match = _re.search(r"can only afford\s+(\d+)", error_text, _re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _invoke_doubt_solver_llm(messages):
+    llm = _get_doubt_solver_llm()
+    try:
+        return await llm.ainvoke(messages)
+    except Exception as e:
+        error_str = str(e)
+        if _is_credit_or_payment_error(error_str):
+            affordable = _extract_affordable_tokens(error_str)
+            if affordable and affordable >= 256:
+                retry_max_tokens = max(256, min(3000, affordable - 64))
+                logger.warning(
+                    f"Doubt Solver hit OpenRouter credit cap; retrying with max_tokens={retry_max_tokens}"
+                )
+                return await llm.bind(max_tokens=retry_max_tokens).ainvoke(messages)
+
+            if _doubt_solver_backup_llm is not None:
+                logger.warning("Doubt Solver OpenRouter credit error; falling back to Mistral API")
+                return await _doubt_solver_backup_llm.ainvoke(messages)
+        raise
 
 def _get_doubt_solver_llm():
     """
     Get LLM for doubt solver using Mistral.
     """
-    global _doubt_solver_llm
+    global _doubt_solver_llm, _doubt_solver_backup_llm
     if _doubt_solver_llm is None:
         if settings.openrouter_api_key:
             logger.info("Initializing Doubt Solver with Mistral Small via OpenRouter")
@@ -246,8 +285,16 @@ def _get_doubt_solver_llm():
                 temperature=0.7,
                 api_key=settings.openrouter_api_key,
                 base_url="https://openrouter.ai/api/v1",
-                max_tokens=4000
+                max_tokens=3000
             )
+            if settings.mistral_api_key:
+                _doubt_solver_backup_llm = ChatOpenAI(
+                    model=settings.mistral_model,
+                    temperature=0.7,
+                    api_key=settings.mistral_api_key,
+                    base_url="https://api.mistral.ai/v1",
+                    max_tokens=3000
+                )
         elif settings.mistral_api_key:
             logger.info("Initializing Doubt Solver with Mistral Medium via Mistral API")
             _doubt_solver_llm = ChatOpenAI(
@@ -255,7 +302,7 @@ def _get_doubt_solver_llm():
                 temperature=0.7,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
-                max_tokens=4000
+                max_tokens=3000
             )
         else:
             raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
@@ -1415,8 +1462,6 @@ async def doubt_solver(file: UploadFile = File(...), question: str = Form("")):
         # Step 2 – LLM explains / solves
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg
 
-        llm = _get_doubt_solver_llm()
-
         system = SystemMessage(content="""You are Lumina Doubt Solver — a brilliant, patient tutor who makes complex concepts click.
 You receive OCR-extracted content from a student's uploaded image (textbook page, notes, problem set, etc.) plus an optional question.
 
@@ -1444,7 +1489,7 @@ Teaching rules:
 ## Student's question:
 {question if question else "Please explain this and solve any problems shown."}"""
 
-        result = await llm.ainvoke([system, HMsg(content=user_msg)])
+        result = await _invoke_doubt_solver_llm([system, HMsg(content=user_msg)])
 
         return _attach_cost({
             "filename": file.filename,
@@ -1457,6 +1502,11 @@ Teaching rules:
         raise
     except Exception as e:
         logger.error(f"Doubt solver error: {str(e)}")
+        if _is_credit_or_payment_error(str(e)):
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient OpenRouter credits for this request. Please reduce response length or top up credits."
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1478,8 +1528,6 @@ async def doubt_solver_chat(request: dict):
             raise HTTPException(status_code=400, detail="No message or image provided")
 
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg
-
-        llm = _get_doubt_solver_llm()
 
         # Image analysis disabled - user should describe the image
         image_context = ""
@@ -1527,7 +1575,7 @@ Teaching rules:
 
         chat_messages.append(HMsg(content="\n\n".join(user_msg_parts) if user_msg_parts else "Please help me understand this."))
 
-        result = await llm.ainvoke(chat_messages)
+        result = await _invoke_doubt_solver_llm(chat_messages)
 
         return _attach_cost({
             "response": result.content,
@@ -1538,6 +1586,11 @@ Teaching rules:
         raise
     except Exception as e:
         logger.error(f"Doubt solver chat error: {str(e)}")
+        if _is_credit_or_payment_error(str(e)):
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient OpenRouter credits for this request. Please reduce response length or top up credits."
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,4 +1,8 @@
-import { ChatSession, Message } from './types'
+import { ChatSession, UnifiedHistoryItem } from './types'
+import { loadExamPrepSessions } from './examPrepStorage'
+import { loadPersonalizedSessions } from './personalizedStorage'
+import { loadDoubtSolverSessions } from './doubtSolverStorage'
+import { loadVideoLectureSessions } from './videoLectureStorage'
 
 const STORAGE_KEY = 'ai-research-chat-history'
 
@@ -71,7 +75,7 @@ export function deleteChatSession(sessionId: string): void {
 }
 
 // Group sessions by relative date
-export function groupSessionsByDate(sessions: ChatSession[]): { label: string; sessions: ChatSession[] }[] {
+export function groupSessionsByDate<T extends { updatedAt: string }>(sessions: T[]): { label: string; sessions: T[] }[] {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const yesterday = new Date(today.getTime() - 86400000)
@@ -98,4 +102,60 @@ export function groupSessionsByDate(sessions: ChatSession[]): { label: string; s
   return Object.entries(groups)
     .filter(([, list]) => list.length > 0)
     .map(([label, sessions]) => ({ label, sessions }))
+}
+
+export function loadUnifiedHistoryItems(): UnifiedHistoryItem[] {
+  const chatItems: UnifiedHistoryItem[] = loadChatSessions().map((s) => ({
+    id: `chat:${s.id}`,
+    mode: 'chat',
+    sessionId: s.id,
+    title: s.title,
+    subtitle: 'Research',
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+
+  const examPrepItems: UnifiedHistoryItem[] = loadExamPrepSessions().map((s) => ({
+    id: `exam-prep:${s.id}`,
+    mode: 'exam-prep',
+    sessionId: s.id,
+    title: s.subject,
+    subtitle: `${s.chapters.length} chapters • ${s.overallProgress}% complete`,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+
+  const personalizedItems: UnifiedHistoryItem[] = loadPersonalizedSessions().map((s) => ({
+    id: `personalized:${s.id}`,
+    mode: 'personalized',
+    sessionId: s.id,
+    title: s.subject,
+    subtitle: `${s.profile.knowledgeLevel} • ${s.overallProgress}% complete`,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+
+  const videoItems: UnifiedHistoryItem[] = loadVideoLectureSessions().map((s) => ({
+    id: `video-lecture:${s.id}`,
+    mode: 'video-lecture',
+    sessionId: s.id,
+    title: s.title || s.topic || 'Video Lecture',
+    subtitle: s.presentation ? `${s.presentation.total_slides} slides` : 'Draft lecture',
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+
+  const doubtItems: UnifiedHistoryItem[] = loadDoubtSolverSessions().map((s) => ({
+    id: `doubt-solver:${s.id}`,
+    mode: 'doubt-solver',
+    sessionId: s.id,
+    title: s.title,
+    subtitle: `${s.messages.length} messages`,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+
+  return [...chatItems, ...examPrepItems, ...personalizedItems, ...videoItems, ...doubtItems].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  )
 }

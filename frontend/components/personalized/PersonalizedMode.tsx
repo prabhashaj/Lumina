@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   PersonalizedSession,
   LearnerProfile,
@@ -33,7 +33,17 @@ import {
 
 type PersonalizedView = 'landing' | 'assessing' | 'assessment' | 'analyzing' | 'plan' | 'content'
 
-export default function PersonalizedMode() {
+interface PersonalizedModeProps {
+  selectedSessionId?: string | null
+  onActiveSessionChange?: (sessionId: string | null) => void
+  onHistoryChanged?: () => void
+}
+
+export default function PersonalizedMode({
+  selectedSessionId,
+  onActiveSessionChange,
+  onHistoryChanged,
+}: PersonalizedModeProps) {
   const [view, setView] = useState<PersonalizedView>('landing')
   const [session, setSession] = useState<PersonalizedSession | null>(null)
   const [savedSessions, setSavedSessions] = useState<PersonalizedSession[]>(() =>
@@ -53,6 +63,21 @@ export default function PersonalizedMode() {
   const [subjectInput, setSubjectInput] = useState('')
   const [isCreatingAssessment, setIsCreatingAssessment] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (selectedSessionId === undefined) return
+    if (selectedSessionId === null) {
+      setSession(null)
+      setView('landing')
+      return
+    }
+    const target = loadPersonalizedSessions().find((s) => s.id === selectedSessionId)
+    if (target) {
+      setSession(target)
+      setSubjectInput(target.subject)
+      setView('plan')
+    }
+  }, [selectedSessionId])
 
   // Start assessment for new topic
   const handleStartAssessment = async () => {
@@ -110,6 +135,8 @@ export default function PersonalizedMode() {
       setSession(newSession)
       setSavedSessions(loadPersonalizedSessions())
       setView('plan')
+      onActiveSessionChange?.(newSession.id)
+      onHistoryChanged?.()
     } catch (err: any) {
       setError(err.message || 'Failed to analyze profile')
       setView('landing')
@@ -143,6 +170,7 @@ export default function PersonalizedMode() {
       setSession(updatedSession)
       savePersonalizedSession(updatedSession)
       setSavedSessions(loadPersonalizedSessions())
+      onHistoryChanged?.()
     }
 
     setView('content')
@@ -165,6 +193,7 @@ export default function PersonalizedMode() {
     setSession(updatedSession)
     savePersonalizedSession(updatedSession)
     setSavedSessions(loadPersonalizedSessions())
+    onHistoryChanged?.()
     setView('plan')
   }
 
@@ -173,15 +202,18 @@ export default function PersonalizedMode() {
     setSession(s)
     setSubjectInput(s.subject)
     setView('plan')
+    onActiveSessionChange?.(s.id)
   }
 
   // Delete session
   const handleDeleteSession = (id: string) => {
     deletePersonalizedSession(id)
     setSavedSessions(loadPersonalizedSessions())
+    onHistoryChanged?.()
     if (session?.id === id) {
       setSession(null)
       setView('landing')
+      onActiveSessionChange?.(null)
     }
   }
 

@@ -19,10 +19,26 @@ import { streamVideoLecture } from '@/lib/api'
 import SlideViewer from './SlideViewer'
 import VoiceNarration from './VoiceNarration'
 import GuideChatbot from '../shared/GuideChatbot'
+import {
+  createVideoLectureSession,
+  loadVideoLectureSessions,
+  saveVideoLectureSession,
+} from '@/lib/videoLectureStorage'
 
 type GenerationStatus = 'idle' | 'generating' | 'ready' | 'error'
 
-export default function VideoLectureMode() {
+interface VideoLectureModeProps {
+  selectedSessionId?: string | null
+  onActiveSessionChange?: (sessionId: string | null) => void
+  onHistoryChanged?: () => void
+}
+
+export default function VideoLectureMode({
+  selectedSessionId,
+  onActiveSessionChange,
+  onHistoryChanged,
+}: VideoLectureModeProps) {
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [topic, setTopic] = useState('')
   const [numSlides, setNumSlides] = useState(10)
   const [difficulty, setDifficulty] = useState('intermediate')
@@ -36,9 +52,48 @@ export default function VideoLectureMode() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [generatedSlideCount, setGeneratedSlideCount] = useState(0)
 
+  useEffect(() => {
+    if (selectedSessionId === undefined) return
+    if (selectedSessionId === null) {
+      setSessionId(null)
+      setStatus('idle')
+      setPresentation(null)
+      setCurrentSlide(0)
+      setIsPlaying(false)
+      return
+    }
+    const target = loadVideoLectureSessions().find((s) => s.id === selectedSessionId)
+    if (target) {
+      setSessionId(target.id)
+      setTopic(target.topic)
+      setPresentation(target.presentation)
+      setStatus(target.status === 'ready' ? 'ready' : target.presentation ? 'ready' : 'idle')
+      setCurrentSlide(0)
+      setIsPlaying(false)
+      onActiveSessionChange?.(target.id)
+    }
+  }, [selectedSessionId, onActiveSessionChange])
+
   // Handle streaming generation
   const handleGenerate = useCallback(async () => {
     if (!topic.trim()) return
+
+    const activeSessionId = sessionId ?? createVideoLectureSession(topic.trim()).id
+    if (!sessionId) {
+      setSessionId(activeSessionId)
+      onActiveSessionChange?.(activeSessionId)
+    }
+
+    saveVideoLectureSession({
+      id: activeSessionId,
+      topic: topic.trim(),
+      title: topic.trim(),
+      presentation: null,
+      createdAt: loadVideoLectureSessions().find((s) => s.id === activeSessionId)?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'generating',
+    })
+    onHistoryChanged?.()
 
     setStatus('generating')
     setError('')
@@ -84,20 +139,32 @@ export default function VideoLectureMode() {
       })
 
       if (slides.length > 0 && status !== 'error') {
-        setPresentation({
+        const builtPresentation = {
           title: metadata.title || topic,
           subtitle: metadata.subtitle || '',
           total_slides: slides.length,
           estimated_duration_minutes: metadata.estimated_duration_minutes || slides.length * 2,
           slides,
-        })
+        }
+        setPresentation(builtPresentation)
         setStatus('ready')
+
+        saveVideoLectureSession({
+          id: activeSessionId,
+          topic: topic.trim(),
+          title: builtPresentation.title,
+          presentation: builtPresentation,
+          createdAt: loadVideoLectureSessions().find((s) => s.id === activeSessionId)?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: 'ready',
+        })
+        onHistoryChanged?.()
       }
     } catch (err: any) {
       setStatus('error')
       setError(err.message || 'Failed to generate video lecture')
     }
-  }, [topic, numSlides, difficulty])
+  }, [topic, numSlides, difficulty, sessionId, onActiveSessionChange, onHistoryChanged, status])
 
   // Handle narration end -> auto-advance to next slide
   const handleNarrationEnd = useCallback(() => {
@@ -288,6 +355,8 @@ export default function VideoLectureMode() {
                 setStatus('idle')
                 setPresentation(null)
                 setIsPlaying(false)
+                setSessionId(null)
+                onActiveSessionChange?.(null)
               }}
               className="px-3 py-1.5 rounded-lg border border-border/20 hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-all duration-200 text-xs font-medium"
             >

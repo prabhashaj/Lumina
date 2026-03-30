@@ -152,6 +152,15 @@ class SearchRouter:
     ) -> SearchComplexity:
         """Heuristic complexity bucketing."""
 
+        normalized = query.strip().lower()
+        # Fast-path common short definition questions to avoid over-searching.
+        if len(normalized.split()) <= 10 and (
+            normalized.startswith("what is")
+            or normalized.startswith("define")
+            or normalized.startswith("explain")
+        ):
+            return SearchComplexity.SIMPLE
+
         # If no intent available, fall back to moderate
         if intent is None:
             return SearchComplexity.MODERATE
@@ -259,15 +268,15 @@ class SearchRouter:
         else:  # COMPLEX
             plan = SearchPlan(
                 complexity=complexity,
-                search_depth="advanced",
-                max_results=7,
-                num_queries=3,
-                include_raw_content=True,
+                search_depth="basic",
+                max_results=5,
+                num_queries=2,
+                include_raw_content=False,
                 include_images=needs_images,
                 include_answer=True,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
-                context_budget_chars=12000,
+                context_budget_chars=8000,
             )
 
         logger.info(

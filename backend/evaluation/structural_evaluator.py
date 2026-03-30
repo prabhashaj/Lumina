@@ -6,6 +6,7 @@ No external LLM calls — purely rule-based and heuristic.
 import re
 import json
 from typing import Dict, List, Any
+import asyncio
 
 
 class StructuralEvaluator:
@@ -140,3 +141,28 @@ class StructuralEvaluator:
             scores.append(src_score)
 
         return round(sum(scores) / len(scores), 4)
+
+
+async def _demo() -> None:
+    evaluator = StructuralEvaluator()
+    result = await evaluator.evaluate_teaching_response_structure(
+        {
+            "tldr": "Plants use sunlight to make glucose from water and carbon dioxide.",
+            "explanation": "## Photosynthesis\n\n- Plants absorb light.\n- They transform water and carbon dioxide into glucose.\n\n**Key idea:** oxygen is released.",
+            "analogy": "A plant is like a solar-powered factory.",
+            "practice_questions": ["Why is chlorophyll important?"],
+            "sources": [
+                {
+                    "title": "Biology reference",
+                    "url": "https://example.com/photosynthesis",
+                    "snippet": "Photosynthesis occurs in chloroplasts.",
+                    "domain": "example.com",
+                }
+            ],
+        }
+    )
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    asyncio.run(_demo())

@@ -66,6 +66,34 @@ class Settings(BaseSettings):
                 pass
             return [s.strip() for s in v.split(",") if s.strip()]
         return v
+
+    @field_validator("max_search_results", mode="before")
+    @classmethod
+    def clamp_max_search_results(cls, v):
+        try:
+            val = int(v)
+        except (TypeError, ValueError):
+            return 5
+        # Keep search fan-out sane for latency and cost.
+        return max(1, min(val, 10))
+
+    @field_validator("max_images_per_response", mode="before")
+    @classmethod
+    def clamp_max_images(cls, v):
+        try:
+            val = int(v)
+        except (TypeError, ValueError):
+            return 6
+        return max(0, min(val, 12))
+
+    @field_validator("timeout_seconds", mode="before")
+    @classmethod
+    def clamp_timeout(cls, v):
+        try:
+            val = int(v)
+        except (TypeError, ValueError):
+            return 30
+        return max(5, min(val, 120))
     
     class Config:
         env_file = ".env"
