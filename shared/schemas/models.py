@@ -66,6 +66,9 @@ class ResearchRequest(BaseModel):
     session_id: Optional[str] = None
     image_context: Optional[str] = None  # VLM-analyzed image description
     file_context: Optional[str] = None   # Extracted text from attached files
+    # PeCAR fields
+    learning_mode: str = "research"
+    learner_profile: Optional[Dict[str, Any]] = None
 
 
 class IntentAnalysis(BaseModel):
@@ -77,6 +80,9 @@ class IntentAnalysis(BaseModel):
     requires_code: bool
     key_concepts: List[str]
     confidence: float = Field(ge=0.0, le=1.0)
+    # PeCAR-enriched fields
+    complexity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    pecar_question_type: str = "conceptual"
 
 
 class SearchResult(BaseModel):
@@ -103,6 +109,7 @@ class TeachingResponse(BaseModel):
     processing_time: float
     follow_up_suggestions: List[str] = []
     cost: Optional[Dict[str, Any]] = None
+    pecar_metrics: Optional[Dict[str, Any]] = None
 
 
 class StreamChunk(BaseModel):
@@ -110,6 +117,15 @@ class StreamChunk(BaseModel):
     type: str  # 'status', 'content', 'image', 'source', 'complete'
     data: Any
     timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class LearnerProfileData(BaseModel):
+    """Learner profile for PeCAR personalisation"""
+    knowledge_level: float = Field(default=0.5, ge=0.0, le=1.0)
+    preferred_style: str = "visual"
+    prior_concepts: List[str] = []
+    difficulty_preference: str = "intermediate"
+    language: str = "en"
 
 
 class AgentState(BaseModel):
@@ -126,6 +142,12 @@ class AgentState(BaseModel):
     quality_score: float = 0.0
     errors: List[str] = []
     metadata: Dict[str, Any] = {}
+    # PeCAR fields
+    learner_profile: Optional[LearnerProfileData] = None
+    pecar_output: Optional[Dict[str, Any]] = None
+    learning_mode: str = "research"
+    complexity_score: float = 0.5
+    pecar_concepts: List[str] = []
 
 
 class ErrorResponse(BaseModel):

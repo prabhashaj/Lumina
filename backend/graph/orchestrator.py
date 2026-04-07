@@ -17,6 +17,8 @@ from shared.schemas.models import (
     SearchResult, Source, ImageData, SourceType, IntentAnalysis
 )
 from config.settings import settings
+from pecar.orchestrator import PeCAR
+from pecar.models import LearnerProfile, LearningMode, PecarIntentAnalysis
 
 
 # TypedDict schema for LangGraph StateGraph (LangGraph requires TypedDict, not Pydantic)
@@ -33,6 +35,10 @@ class GraphState(TypedDict, total=False):
     quality_score: float
     errors: List[str]
     metadata: Dict[str, Any]
+    # PeCAR fields
+    pecar_output: Optional[Dict[str, Any]]
+    learning_mode: str
+    learner_profile: Optional[Dict[str, Any]]
 
 
 class ResearchOrchestrator:
@@ -61,16 +67,18 @@ class ResearchOrchestrator:
         workflow.add_node("search_web", self.search_web_node)
         workflow.add_node("extract_content", self.extract_content_node)
         workflow.add_node("select_images", self.select_images_node)
+        workflow.add_node("pecar_reasoning", self.pecar_reasoning_node)
         workflow.add_node("synthesize_teaching", self.synthesize_teaching_node)
         workflow.add_node("assess_quality", self.assess_quality_node)
-        
-        # Define the flow (sequential pipeline)
+
+        # Define the flow (sequential pipeline with PeCAR between images and synthesis)
         workflow.add_edge("classify_intent", "plan_search")
         workflow.add_edge("plan_search", "generate_queries")
         workflow.add_edge("generate_queries", "search_web")
         workflow.add_edge("search_web", "extract_content")
         workflow.add_edge("extract_content", "select_images")
-        workflow.add_edge("select_images", "synthesize_teaching")
+        workflow.add_edge("select_images", "pecar_reasoning")
+        workflow.add_edge("pecar_reasoning", "synthesize_teaching")
         workflow.add_edge("synthesize_teaching", "assess_quality")
         
         # Conditional edge: retry if quality is low
@@ -115,7 +123,11 @@ class ResearchOrchestrator:
             "retries": 0,
             "quality_score": 0.0,
             "errors": [],
-            "metadata": {"start_time": start_time}
+            "metadata": {"start_time": start_time},
+            # PeCAR fields
+            "pecar_output": None,
+            "learning_mode": getattr(request, "learning_mode", "research"),
+            "learner_profile": getattr(request, "learner_profile", None),
         }
         
         # Run the graph
@@ -361,10 +373,85 @@ class ResearchOrchestrator:
         
         return {"images": images}
     
+    async def pecar_reasoning_node(self, state: AgentState) -> Dict[str, Any]:
+        """Node: Run PeCAR 6-stage reasoning pipeline on extracted content"""
+        logger.info("NODE: Running PeCAR reasoning pipeline...")
+
+        if isinstance(state, dict):
+            original_question = state["original_question"]
+            intent = state.get("intent")
+            extracted_content = state.get("extracted_content", [])
+            sources = state.get("sources", [])
+            metadata = state.get("metadata", {})
+            learner_profile = state.get("learner_profile")
+            learning_mode = state.get("learning_mode", "research")
+        else:
+            original_question = state.original_question
+            intent = state.intent
+            extracted_content = state.extracted_content
+            sources = state.sources
+            metadata = state.metadata
+            learner_profile = getattr(state, "learner_profile", None)
+            learning_mode = getattr(state, "learning_mode", "research")
+
+        # Build PeCAR-compatible intent from Lumina's IntentAnalysis
+        pecar_intent_data = {}
+        if intent:
+            pecar_intent_data = {
+                "question_type": getattr(intent, "pecar_question_type", "conceptual"),
+                "complexity": getattr(intent, "complexity_score", 0.5),
+                "concepts": getattr(intent, "key_concepts", []),
+                "difficulty": getattr(intent, "difficulty_level", {}).value
+                    if hasattr(getattr(intent, "difficulty_level", None), "value")
+                    else "intermediate",
+                "requires_retrieval": True,
+                "requires_visual": getattr(intent, "requires_visuals", False),
+            }
+
+        # Build retrieved context from extracted content
+        retrieved_context = "\n\n".join(extracted_content[:5])
+
+        # Build source URLs
+        source_urls = [s.url for s in sources[:8]] if sources else []
+
+        # Build PeCAR state dict
+        pecar_state = {
+            "query": original_question,
+            "intent_analysis": pecar_intent_data,
+            "mode": learning_mode,
+            "learner_profile": learner_profile or {},
+            "retrieved_context": retrieved_context,
+            "sources": source_urls,
+            "eval_scores": {},  # Will be populated on retry via QFPR
+        }
+
+        try:
+            pecar = PeCAR(call_llm_fn=self.teaching_agent._call_llm)
+            result = await pecar.run(pecar_state)
+
+            pecar_output = result.model_dump()
+            metadata["pecar_output"] = pecar_output
+            metadata["pecar_final_response"] = result.final_response
+
+            logger.info(
+                "PeCAR pipeline complete: mode=%s, depth=%.2f, steps=%d, paths=%d",
+                result.mode.value,
+                result.depth_score,
+                result.num_reasoning_steps,
+                len(result.paths_evaluated),
+            )
+
+            return {"metadata": metadata, "pecar_output": pecar_output}
+
+        except Exception as e:
+            logger.error(f"PeCAR reasoning failed: {e} — synthesis will proceed without PeCAR")
+            metadata["pecar_error"] = str(e)
+            return {"metadata": metadata, "pecar_output": None}
+
     async def synthesize_teaching_node(self, state: AgentState) -> Dict[str, Any]:
-        """Node: Synthesize teaching content"""
+        """Node: Synthesize teaching content (uses PeCAR output when available)"""
         logger.info("NODE: Synthesizing teaching content...")
-        
+
         if isinstance(state, dict):
             original_question = state["original_question"]
             intent = state.get("intent")
@@ -372,6 +459,7 @@ class ResearchOrchestrator:
             images = state.get("images", [])
             sources = state.get("sources", [])
             metadata = state.get("metadata", {})
+            pecar_output = state.get("pecar_output")
         else:
             original_question = state.original_question
             intent = state.intent
@@ -379,17 +467,23 @@ class ResearchOrchestrator:
             images = state.images
             sources = state.sources
             metadata = state.metadata
-        
+            pecar_output = getattr(state, "pecar_output", None)
+
+        # Also check metadata for pecar_output (populated by pecar_reasoning_node)
+        if not pecar_output:
+            pecar_output = metadata.get("pecar_output")
+
         teaching_response = await self.teaching_agent.synthesize(
             question=original_question,
             intent=intent,
             extracted_content=extracted_content,
             images=images,
-            sources=sources
+            sources=sources,
+            pecar_output=pecar_output,
         )
-        
+
         metadata["teaching_response"] = teaching_response
-        
+
         return {"metadata": metadata}
     
     async def assess_quality_node(self, state: AgentState) -> Dict[str, Any]:

@@ -70,10 +70,18 @@ class TeachingSynthesisAgent:
                 return await self.backup_llm.ainvoke(messages)
             raise
 
-    async def _call_llm(self, prompt: str) -> str:
-        """Direct LLM call for structured generation (roadmaps, quizzes, etc.)"""
+    async def _call_llm(self, prompt: str, system: str = "", **kwargs) -> str:
+        """Direct LLM call for structured generation.
+
+        Also serves as the PeCAR-compatible LLM callable (prompt + system -> str).
+        """
         try:
-            response = await self._call_llm_with_fallback([HumanMessage(content=prompt)])
+            messages = []
+            if system:
+                from langchain_core.messages import SystemMessage
+                messages.append(SystemMessage(content=system))
+            messages.append(HumanMessage(content=prompt))
+            response = await self._call_llm_with_fallback(messages)
             return response.content
         except Exception as e:
             logger.error(f"LLM call error: {str(e)}")
@@ -85,58 +93,71 @@ class TeachingSynthesisAgent:
         intent: IntentAnalysis,
         extracted_content: List[str],
         images: List[ImageData],
-        sources: List[Source]
+        sources: List[Source],
+        pecar_output: dict = None,
     ) -> TeachingResponse:
         """
         Create a comprehensive teaching response
-        
+
         Args:
             question: Original student question
             intent: Intent analysis results
             extracted_content: Extracted research content
             images: Relevant images
             sources: Source citations
-            
+            pecar_output: Optional PeCAR pipeline output dict (from pecar_reasoning_node)
+
         Returns:
             Complete TeachingResponse
         """
         try:
             logger.info(f"Synthesizing teaching content for: {question[:50]}...")
-            
-            # Build research summary
-            research_content = self._format_research(extracted_content, sources)
-            
-            # Format image references (no VLM analysis, just URLs)
-            image_references = self._format_image_references(images)
-            
-            # Get difficulty-specific instructions
-            difficulty_instructions = {
-                "beginner": TEACHING_SYNTHESIS_BEGINNER,
-                "intermediate": TEACHING_SYNTHESIS_INTERMEDIATE,
-                "advanced": TEACHING_SYNTHESIS_ADVANCED
-            }.get(intent.difficulty_level.value, "")
-            
-            # Create main prompt
-            full_prompt = TEACHING_SYNTHESIS_PROMPT + "\n\n" + difficulty_instructions
-            
-            # Add image section if images available
-            if image_references:
-                full_prompt += "\n\n## Visual Content Available\n"
-                full_prompt += "Visual aids are provided to enhance learning. Reference them naturally in your explanation:\n\n"
-                full_prompt += image_references
-            
-            prompt_text = full_prompt.format(
-                question=question,
-                difficulty=intent.difficulty_level.value,
-                question_type=intent.question_type.value,
-                concepts=", ".join(intent.key_concepts),
-                research_content=research_content,
-                num_images=len(images)
-            )
-            messages = [HumanMessage(content=prompt_text)]
 
-            response = await self._call_llm_with_fallback(messages)
-            content = response.content
+            # If PeCAR produced a final response, use it as the base content
+            pecar_final = None
+            if pecar_output and pecar_output.get("final_response"):
+                pecar_final = pecar_output["final_response"]
+                logger.info("Using PeCAR-enhanced response (len=%d)", len(pecar_final))
+
+            if pecar_final:
+                # PeCAR already did multi-path synthesis + assembly — use it directly
+                content = pecar_final
+            else:
+                # Fallback to original direct LLM synthesis
+                # Build research summary
+                research_content = self._format_research(extracted_content, sources)
+
+                # Format image references (no VLM analysis, just URLs)
+                image_references = self._format_image_references(images)
+
+                # Get difficulty-specific instructions
+                difficulty_instructions = {
+                    "beginner": TEACHING_SYNTHESIS_BEGINNER,
+                    "intermediate": TEACHING_SYNTHESIS_INTERMEDIATE,
+                    "advanced": TEACHING_SYNTHESIS_ADVANCED
+                }.get(intent.difficulty_level.value, "")
+
+                # Create main prompt
+                full_prompt = TEACHING_SYNTHESIS_PROMPT + "\n\n" + difficulty_instructions
+
+                # Add image section if images available
+                if image_references:
+                    full_prompt += "\n\n## Visual Content Available\n"
+                    full_prompt += "Visual aids are provided to enhance learning. Reference them naturally in your explanation:\n\n"
+                    full_prompt += image_references
+
+                prompt_text = full_prompt.format(
+                    question=question,
+                    difficulty=intent.difficulty_level.value,
+                    question_type=intent.question_type.value,
+                    concepts=", ".join(intent.key_concepts),
+                    research_content=research_content,
+                    num_images=len(images)
+                )
+                messages = [HumanMessage(content=prompt_text)]
+
+                response = await self._call_llm_with_fallback(messages)
+                content = response.content
             
             logger.info(f"LLM response length: {len(content)} chars")
             logger.info(f"LLM response preview: {content[:300]}...")
@@ -185,6 +206,19 @@ class TeachingSynthesisAgent:
             for idx, q in enumerate(parsed.get("practice_questions", []), 1):
                 logger.info(f"  Q{idx}: {q[:80]}")
             
+            # Build PeCAR metrics if available
+            pecar_metrics = None
+            if pecar_output:
+                pecar_metrics = {
+                    "mode": pecar_output.get("mode"),
+                    "depth_score": pecar_output.get("depth_score", 0.0),
+                    "num_reasoning_steps": pecar_output.get("num_reasoning_steps", 0),
+                    "paths_evaluated": len(pecar_output.get("paths_evaluated", [])),
+                    "refinement_iterations": len(pecar_output.get("refinement_history", [])),
+                    "techniques_applied": pecar_output.get("metadata", {}).get("techniques_applied", []),
+                    "sources_used": len(pecar_output.get("sources_used", [])),
+                }
+
             teaching_response = TeachingResponse(
                 question=question,
                 tldr=parsed.get("tldr", ""),
@@ -200,7 +234,8 @@ class TeachingSynthesisAgent:
                 difficulty_level=intent.difficulty_level,
                 confidence_score=0.85,  # Will be assessed by quality agent
                 processing_time=0.0,  # Will be set by orchestrator
-                follow_up_suggestions=[]  # Will be generated later
+                follow_up_suggestions=[],  # Will be generated later
+                pecar_metrics=pecar_metrics,
             )
             
             logger.info("Teaching synthesis complete")

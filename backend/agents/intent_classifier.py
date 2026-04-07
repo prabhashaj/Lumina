@@ -109,14 +109,32 @@ class IntentClassifierAgent:
             # Parse response with robust JSON extraction
             result = extract_json_from_response(response.content)
             
+            # Derive PeCAR complexity_score from difficulty + question_type heuristics
+            difficulty_val = result["difficulty_level"]
+            complexity_map = {"beginner": 0.3, "intermediate": 0.55, "advanced": 0.8}
+            base_complexity = complexity_map.get(difficulty_val, 0.5)
+            qtype = result["question_type"]
+            type_boost = {"mathematical": 0.1, "mixed": 0.05, "practical": 0.0, "conceptual": 0.0}
+            complexity_score = min(1.0, base_complexity + type_boost.get(qtype, 0.0))
+
+            # Map existing question types to PeCAR-compatible types
+            pecar_qtype_map = {
+                "conceptual": "conceptual",
+                "practical": "procedural",
+                "mathematical": "procedural",
+                "mixed": "evaluative",
+            }
+
             intent = IntentAnalysis(
-                difficulty_level=DifficultyLevel(result["difficulty_level"]),
-                question_type=QuestionType(result["question_type"]),
+                difficulty_level=DifficultyLevel(difficulty_val),
+                question_type=QuestionType(qtype),
                 requires_visuals=result["requires_visuals"],
                 requires_math=result["requires_math"],
                 requires_code=result["requires_code"],
                 key_concepts=result["key_concepts"],
-                confidence=result["confidence"]
+                confidence=result["confidence"],
+                complexity_score=complexity_score,
+                pecar_question_type=pecar_qtype_map.get(qtype, "conceptual"),
             )
             
             logger.info(f"Intent analysis complete: {intent.difficulty_level}, {intent.question_type}")

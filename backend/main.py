@@ -471,7 +471,11 @@ async def research_question_stream(request: ResearchRequest):
             for idx, q in enumerate(response.practice_questions, 1):
                 logger.info(f"  Streaming Q{idx}: {q[:80]}")
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
-            
+
+            # Send PeCAR metrics if available
+            if response.pecar_metrics:
+                yield f"data: {json.dumps({'type': 'pecar_metrics', 'data': response.pecar_metrics})}\n\n"
+
             response.cost = summarize_cost()
 
             # Send complete signal
