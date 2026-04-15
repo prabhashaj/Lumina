@@ -1,6 +1,9 @@
 """
 Teaching Synthesis Agent - Creates comprehensive, pedagogically sound explanations
 """
+import asyncio
+import re
+from datetime import datetime
 from typing import List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -23,30 +26,12 @@ class TeachingSynthesisAgent:
     """Synthesizes research into comprehensive teaching content"""
     
     def __init__(self):
-        # Use OpenRouter Mistral Small (primary), then Mistral API Medium (backup)
+        # Use Mistral API only.
         self.llm = None
         self.backup_llm = None
-        
-        if settings.openrouter_api_key:
-            logger.info("Teaching Synthesis: Using Mistral Small via OpenRouter")
-            self.llm = ChatOpenAI(
-                model=settings.openrouter_model,
-                temperature=0.4,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                max_tokens=3000
-            )
-            # Set backup to Mistral API if available
-            if settings.mistral_api_key:
-                self.backup_llm = ChatOpenAI(
-                    model=settings.mistral_model,
-                    temperature=0.4,
-                    api_key=settings.mistral_api_key,
-                    base_url="https://api.mistral.ai/v1",
-                    max_tokens=3000
-                )
-        elif settings.mistral_api_key:
-            logger.info("Teaching Synthesis: Using Mistral Medium via Mistral API")
+
+        if settings.mistral_api_key:
+            logger.info("Teaching Synthesis: Using Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.4,
@@ -56,7 +41,7 @@ class TeachingSynthesisAgent:
             )
         
         if not self.llm:
-            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+            raise ValueError("No valid API key found. Please set MISTRAL_API_KEY")
 
     async def _call_llm_with_fallback(self, messages):
         """Call LLM with automatic fallback to backup on errors"""
@@ -113,51 +98,89 @@ class TeachingSynthesisAgent:
         try:
             logger.info(f"Synthesizing teaching content for: {question[:50]}...")
 
+            if self._is_live_update_request(question):
+                logger.info("Live-update query detected; using direct score synthesis path")
+                return self._build_live_update_response(
+                    question=question,
+                    intent=intent,
+                    extracted_content=extracted_content,
+                    images=images,
+                    sources=sources,
+                )
+
             # If PeCAR produced a final response, use it as the base content
             pecar_final = None
             if pecar_output and pecar_output.get("final_response"):
-                pecar_final = pecar_output["final_response"]
-                logger.info("Using PeCAR-enhanced response (len=%d)", len(pecar_final))
+                candidate = pecar_output["final_response"]
+                if self._is_usable_pecar_output(candidate):
+                    pecar_final = candidate
+                    logger.info("Using PeCAR guidance for synthesis (len=%d)", len(pecar_final))
+                else:
+                    logger.warning("PeCAR output unusable, falling back to direct synthesis")
 
+            # Always run final synthesis for consistent output format; inject PeCAR as guidance.
+            research_content = self._format_research(extracted_content, sources)
             if pecar_final:
-                # PeCAR already did multi-path synthesis + assembly — use it directly
-                content = pecar_final
-            else:
-                # Fallback to original direct LLM synthesis
-                # Build research summary
-                research_content = self._format_research(extracted_content, sources)
+                research_content += self._format_pecar_guidance(pecar_final)
 
-                # Format image references (no VLM analysis, just URLs)
-                image_references = self._format_image_references(images)
+            # Format image references (no VLM analysis, just URLs)
+            image_references = self._format_image_references(images)
 
-                # Get difficulty-specific instructions
-                difficulty_instructions = {
-                    "beginner": TEACHING_SYNTHESIS_BEGINNER,
-                    "intermediate": TEACHING_SYNTHESIS_INTERMEDIATE,
-                    "advanced": TEACHING_SYNTHESIS_ADVANCED
-                }.get(intent.difficulty_level.value, "")
+            # Get difficulty-specific instructions
+            difficulty_instructions = {
+                "beginner": TEACHING_SYNTHESIS_BEGINNER,
+                "intermediate": TEACHING_SYNTHESIS_INTERMEDIATE,
+                "advanced": TEACHING_SYNTHESIS_ADVANCED
+            }.get(intent.difficulty_level.value, "")
 
-                # Create main prompt
-                full_prompt = TEACHING_SYNTHESIS_PROMPT + "\n\n" + difficulty_instructions
+            # Create main prompt
+            full_prompt = TEACHING_SYNTHESIS_PROMPT + "\n\n" + difficulty_instructions
 
-                # Add image section if images available
-                if image_references:
-                    full_prompt += "\n\n## Visual Content Available\n"
-                    full_prompt += "Visual aids are provided to enhance learning. Reference them naturally in your explanation:\n\n"
-                    full_prompt += image_references
+            # Add image section if images available
+            if image_references:
+                full_prompt += "\n\n## Visual Content Available\n"
+                full_prompt += "Visual aids are provided to enhance learning. Reference them naturally in your explanation:\n\n"
+                full_prompt += image_references
 
-                prompt_text = full_prompt.format(
-                    question=question,
-                    difficulty=intent.difficulty_level.value,
-                    question_type=intent.question_type.value,
-                    concepts=", ".join(intent.key_concepts),
-                    research_content=research_content,
-                    num_images=len(images)
+            prompt_text = full_prompt.format(
+                question=question,
+                difficulty=intent.difficulty_level.value,
+                question_type=intent.question_type.value,
+                concepts=", ".join(intent.key_concepts),
+                research_content=research_content,
+                num_images=len(images)
+            )
+            messages = [HumanMessage(content=prompt_text)]
+
+            synthesis_timeout = max(10, int(getattr(settings, "synthesis_timeout_seconds", 35)))
+            try:
+                response = await asyncio.wait_for(
+                    self._call_llm_with_fallback(messages),
+                    timeout=synthesis_timeout,
                 )
-                messages = [HumanMessage(content=prompt_text)]
-
-                response = await self._call_llm_with_fallback(messages)
                 content = response.content
+            except asyncio.TimeoutError:
+                logger.warning("Teaching synthesis timed out; retrying once with compact structured prompt")
+                retry_prompt = prompt_text + (
+                    "\n\nIMPORTANT: Keep the same section format exactly "
+                    "(TL;DR, Step-by-Step Explanation, Visual Explanation, Real-World Analogy, Practice Questions), "
+                    "but be concise and complete."
+                )
+                retry_messages = [HumanMessage(content=retry_prompt)]
+                retry_timeout = max(8, synthesis_timeout // 2)
+                try:
+                    retry_response = await asyncio.wait_for(
+                        self._call_llm_with_fallback(retry_messages),
+                        timeout=retry_timeout,
+                    )
+                    content = retry_response.content
+                except asyncio.TimeoutError:
+                    logger.warning("Teaching synthesis retry timed out; using deterministic fallback content")
+                    content = self._build_timeout_fallback_content(
+                        question=question,
+                        intent=intent,
+                        extracted_content=extracted_content,
+                    )
             
             logger.info(f"LLM response length: {len(content)} chars")
             logger.info(f"LLM response preview: {content[:300]}...")
@@ -244,6 +267,134 @@ class TeachingSynthesisAgent:
         except Exception as e:
             logger.error(f"Teaching synthesis error: {str(e)}")
             raise
+
+    def _is_usable_pecar_output(self, text: str) -> bool:
+        """Validate PeCAR output before using it as final answer content."""
+        if not text or not isinstance(text, str):
+            return False
+        cleaned = text.strip()
+        lowered = cleaned.lower()
+
+        # Reject known fallback/error patterns from upstream PeCAR steps.
+        if lowered.startswith("i encountered an error generating a response"):
+            return False
+        if "fallback generation also failed" in lowered:
+            return False
+
+        # Require enough substance to parse into teaching sections.
+        return len(cleaned) >= 900
+
+    @staticmethod
+    def _is_live_update_request(question: str) -> bool:
+        q = (question or "").strip().lower()
+        if not q:
+            return False
+        has_live_signal = bool(re.search(r"\b(live|current|now|today|latest|real[ -]?time)\b", q))
+        has_score_signal = bool(re.search(r"\b(score|scorecard|ipl|cricket|match|runs|wickets|overs)\b", q))
+        return has_live_signal and has_score_signal
+
+    @staticmethod
+    def _extract_live_score_indicators(text: str) -> List[str]:
+        """Extract likely live-score snippets from raw fetched content."""
+        if not text:
+            return []
+
+        lines = [ln.strip() for ln in re.split(r"[\n\r]+", text) if ln.strip()]
+        candidates = []
+
+        score_pattern = re.compile(
+            r"\b[A-Z]{2,5}\s*\d{1,3}/\d{1,2}(?:\s*\(\d{1,2}(?:\.\d)?\s*overs?\))?\b"
+        )
+        chase_pattern = re.compile(r"\bneed\s+\d+\s+runs?\s+in\s+\d+\s+balls?\b", re.IGNORECASE)
+
+        for ln in lines:
+            compact = re.sub(r"\s+", " ", ln)
+            low = compact.lower()
+            if len(compact) < 12:
+                continue
+            if score_pattern.search(compact) or chase_pattern.search(compact):
+                candidates.append(compact[:220])
+                continue
+            if any(tok in low for tok in ["live", "score", "scorecard", "overs", "wickets", "innings"]):
+                if any(ch.isdigit() for ch in compact):
+                    candidates.append(compact[:220])
+
+        unique = []
+        seen = set()
+        for c in candidates:
+            norm = c.lower().strip()
+            if norm not in seen:
+                unique.append(c)
+                seen.add(norm)
+
+        return unique[:6]
+
+    def _build_live_update_response(
+        self,
+        question: str,
+        intent: IntentAnalysis,
+        extracted_content: List[str],
+        images: List[ImageData],
+        sources: List[Source],
+    ) -> TeachingResponse:
+        """Build a direct, timestamped live-update style response from retrieved evidence."""
+        indicators: List[str] = []
+        for block in extracted_content[:4]:
+            indicators.extend(self._extract_live_score_indicators(block))
+
+        fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if indicators:
+            top = indicators[0]
+            tldr = (
+                f"Latest live-score signal (fetched at {fetched_at}): {top}. "
+                "If this differs from your app, score feeds may be a few seconds behind across sources."
+            )
+            explanation_lines = [
+                f"Live query: {question}",
+                f"Fetched at: {fetched_at}",
+                "",
+                "Top extracted score indicators:",
+            ]
+            for idx, item in enumerate(indicators[:4], 1):
+                explanation_lines.append(f"{idx}. {item}")
+        else:
+            tldr = (
+                f"I could not extract a reliable numeric live score at {fetched_at}. "
+                "Live score pages are highly dynamic and can block extraction."
+            )
+            explanation_lines = [
+                f"Live query: {question}",
+                f"Fetched at: {fetched_at}",
+                "",
+                "What happened:",
+                "1. Sources were fetched, but no stable scoreline pattern was detected in the extracted text.",
+                "2. This usually happens on JavaScript-heavy scoreboards.",
+                "3. Use the cited scorecard links below to verify the exact current number.",
+            ]
+
+        return TeachingResponse(
+            question=question,
+            tldr=tldr,
+            explanation=TeachingSection(
+                title="Live Score Update",
+                content="\n".join(explanation_lines),
+            ),
+            visual_explanation=None,
+            images=images,
+            analogy="Live score feeds behave like multiple stopwatches started at slightly different moments.",
+            practice_questions=[
+                "Do you want only the latest scoreline, or full match context (run rate, required rate, partnerships)?",
+                "Should I prioritize one source (for example ESPNcricinfo) as the primary score reference?",
+                "Do you want auto-refresh style updates each time you ask for the score?",
+            ],
+            sources=sources,
+            difficulty_level=intent.difficulty_level,
+            confidence_score=0.8 if indicators else 0.55,
+            processing_time=0.0,
+            follow_up_suggestions=[],
+            pecar_metrics=None,
+        )
     
     def _format_research(self, content_list: List[str], sources: List[Source]) -> str:
         """Format research content with source references"""
@@ -251,6 +402,51 @@ class TeachingSynthesisAgent:
         for idx, (content, source) in enumerate(zip(content_list, sources[:len(content_list)])):
             formatted.append(f"[{idx + 1}] {source.domain}: {content[:1200]}")
         return "\n\n".join(formatted)
+
+    def _format_pecar_guidance(self, pecar_final: str) -> str:
+        """Inject PeCAR reasoning as compact synthesis guidance."""
+        snippet = (pecar_final or "").strip()
+        if not snippet:
+            return ""
+        snippet = snippet[:2600]
+        return (
+            "\n\n[PeCAR Guidance - prioritize verified reasoning and pedagogical sequencing]\n"
+            f"{snippet}"
+        )
+
+    def _build_timeout_fallback_content(
+        self,
+        question: str,
+        intent: IntentAnalysis,
+        extracted_content: List[str],
+    ) -> str:
+        """Create a deterministic, parseable teaching response when LLM synthesis times out."""
+        key_concepts = ", ".join(intent.key_concepts[:6]) if intent and intent.key_concepts else "core concepts"
+        evidence = " ".join((extracted_content or [""])[:2])[:1200].strip()
+        if not evidence:
+            evidence = "Relevant sources were found, but detailed extraction was incomplete due timeout."
+
+        return (
+            "## TL;DR\n"
+            f"{question} can be understood by breaking it into clear core ideas and applying them step by step. "
+            f"Key focus areas: {key_concepts}.\n\n"
+            "## Step-by-Step Explanation\n"
+            "1. Identify the core terms and definitions involved in the question.\n"
+            "2. Separate what is conceptual from what is procedural or computational.\n"
+            "3. Connect the main ideas using a concrete worked example.\n"
+            "4. Highlight common errors and how to avoid them.\n"
+            "5. Summarize decision rules for solving similar problems.\n\n"
+            f"Evidence snapshot: {evidence}\n\n"
+            "## Visual Explanation\n"
+            "Imagine a flow from problem statement -> key concepts -> method choice -> worked example -> final checks.\n\n"
+            "## Real-World Analogy\n"
+            "Like planning a trip: you choose the route based on constraints, verify each step, and adjust when conditions change.\n\n"
+            "## Practice Questions\n"
+            f"1. What is the key idea behind: {question}?\n"
+            f"2. Which method would you choose first for {question}, and why?\n"
+            f"3. What is a common mistake when solving {question}, and how would you catch it?\n"
+            f"4. How would the solution change if one core assumption in {question} changed?\n"
+        )
 
     def _build_fallback_questions(self, question: str, existing: List[str]) -> List[str]:
         """Build fast deterministic fallback questions without a second LLM call."""

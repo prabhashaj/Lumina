@@ -6,6 +6,7 @@ Optimised for cost, latency, and context quality via SearchPlan + caching.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import List, Optional
 
@@ -55,6 +56,7 @@ class WebSearchAgent:
         include_domains = plan.include_domains if plan else []
         exclude_domains = plan.exclude_domains if plan else []
         topic = plan.topic if plan else "general"
+        time_range = plan.time_range if plan else None
         context_budget = plan.context_budget_chars if plan else 6000
 
         # ---------- cache check ----------
@@ -66,6 +68,7 @@ class WebSearchAgent:
         # ---------- API call ----------
         try:
             t0 = time.time()
+            timeout_seconds = max(5, int(getattr(settings, "timeout_seconds", 30)))
             logger.info(
                 f"Tavily search: depth={depth}, max={max_results}, "
                 f"raw={raw_content}, images={images} | {query[:80]}"
@@ -84,9 +87,14 @@ class WebSearchAgent:
                 kwargs["include_domains"] = include_domains
             if exclude_domains:
                 kwargs["exclude_domains"] = exclude_domains
+            if time_range:
+                kwargs["time_range"] = time_range
 
             record_tavily_search(depth, 1)
-            response = self.client.search(**kwargs)
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self.client.search, **kwargs),
+                timeout=timeout_seconds,
+            )
             elapsed = time.time() - t0
 
             # ---------- parse results ----------
@@ -124,6 +132,11 @@ class WebSearchAgent:
 
             return results
 
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Tavily search timed out after {timeout_seconds}s for query: {query[:80]}"
+            )
+            return []
         except Exception as e:
             logger.error(f"Search error: {e}")
             return []
@@ -150,7 +163,8 @@ class WebSearchAgent:
         all_image_urls: List[str] = []
         seen_image_urls: set = set()
 
-        for query in effective_queries:
+        for idx, query in enumerate(effective_queries, 1):
+            logger.info(f"Executing web query {idx}/{len(effective_queries)}: {query[:100]}")
             results = await self.search(query, plan=plan)
             for result in results:
                 # Collect images before URL dedup

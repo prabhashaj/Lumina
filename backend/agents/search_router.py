@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -82,6 +83,15 @@ TRUSTED_EDUCATIONAL_DOMAINS = [
 LOW_QUALITY_DOMAINS = [
     "pinterest.com", "quora.com", "tiktok.com",
     "facebook.com", "instagram.com", "twitter.com",
+    "reddit.com",
+]
+
+LIVE_SCORE_DOMAINS = [
+    "espncricinfo.com",
+    "espn.com",
+    "cricbuzz.com",
+    "livescore.com",
+    "flashscore.com",
 ]
 
 
@@ -146,6 +156,17 @@ class SearchRouter:
 
     # ---- complexity classification ----
     @staticmethod
+    def _is_live_data_query(query: str) -> bool:
+        """Detect requests that need up-to-the-minute factual data."""
+        q = (query or "").strip().lower()
+        if not q:
+            return False
+
+        has_live_signal = bool(re.search(r"\b(live|current|now|today|latest|real[ -]?time)\b", q))
+        has_score_signal = bool(re.search(r"\b(score|scorecard|match|ipl|cricket|runs|wickets|overs)\b", q))
+        return has_live_signal and has_score_signal
+
+    @staticmethod
     def _classify_complexity(
         intent: Optional[IntentAnalysis],
         query: str,
@@ -153,6 +174,10 @@ class SearchRouter:
         """Heuristic complexity bucketing."""
 
         normalized = query.strip().lower()
+        if SearchRouter._is_live_data_query(normalized):
+            # Keep live lookups cheap and fast; freshness matters most here.
+            return SearchComplexity.SIMPLE
+
         # Fast-path common short definition questions to avoid over-searching.
         if len(normalized.split()) <= 10 and (
             normalized.startswith("what is")
@@ -232,10 +257,28 @@ class SearchRouter:
         """
         complexity = self._classify_complexity(intent, query)
         include_domains, exclude_domains = self._select_domains(intent)
+        is_live_query = self._is_live_data_query(query)
 
         needs_images = force_images or (
             intent.requires_visuals if intent else True
         )
+
+        if is_live_query:
+            # For live data, prioritise freshness and trusted scorecard domains.
+            return SearchPlan(
+                complexity=SearchComplexity.SIMPLE,
+                search_depth="basic",
+                max_results=5,
+                num_queries=2,
+                include_raw_content=True,
+                include_images=False,
+                include_answer=True,
+                include_domains=LIVE_SCORE_DOMAINS,
+                exclude_domains=exclude_domains,
+                topic="news",
+                time_range="day",
+                context_budget_chars=3000,
+            )
 
         if complexity == SearchComplexity.SIMPLE:
             plan = SearchPlan(
@@ -301,6 +344,22 @@ class SearchRouter:
         """
         concepts = intent.key_concepts if intent else []
         queries: List[str] = []
+        is_live_query = self._is_live_data_query(original_question)
+
+        if is_live_query:
+            q = original_question.strip()
+            base = re.sub(r"\s+", " ", q)
+            queries.append(f"{base} scorecard")
+            queries.append("IPL live score today scorecard ESPNcricinfo Cricbuzz")
+
+            seen_live = set()
+            unique_live: List[str] = []
+            for live_q in queries:
+                norm = live_q.strip().lower()
+                if norm not in seen_live:
+                    unique_live.append(live_q)
+                    seen_live.add(norm)
+            return unique_live[:plan.num_queries]
 
         if plan.num_queries == 1:
             # Single optimised query
