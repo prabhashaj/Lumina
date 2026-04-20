@@ -17,6 +17,11 @@ build/
 logs/
 *.log
 
+# Generated reports and documents
+backend/reports/
+docs/generated/
+*.docx
+
 # Environment
 .env
 .env.local

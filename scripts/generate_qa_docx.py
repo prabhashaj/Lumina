@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""Backward-compatible launcher for QA DOCX generation."""
+
+from pathlib import Path
+import runpy
+
+
+if __name__ == "__main__":
+    root = Path(__file__).resolve().parents[1]
+    target = root / "scripts" / "docs" / "generate_qa_docx.py"
+    runpy.run_path(str(target), run_name="__main__")
 from pathlib import Path
 
 from docx import Document
@@ -112,7 +123,9 @@ def build_docx_from_markdown(md_path: Path, docx_path: Path) -> None:
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     md_path = root / "LUMINA_QA_Testing_Document.md"
-    docx_path = root / "LUMINA_QA_Testing_Document.docx"
+    output_dir = root / "docs" / "generated"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    docx_path = output_dir / "LUMINA_QA_Testing_Document.docx"
     build_docx_from_markdown(md_path, docx_path)
     print(f"Created: {docx_path}")
 

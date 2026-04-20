@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""Backward-compatible launcher for project report DOCX generation."""
-
-from pathlib import Path
-import runpy
-
-
-if __name__ == "__main__":
-    root = Path(__file__).resolve().parents[1]
-    target = root / "scripts" / "docs" / "generate_project_report_docx.py"
-    runpy.run_path(str(target), run_name="__main__")
 from pathlib import Path
 
 from docx import Document
