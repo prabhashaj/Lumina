@@ -91,15 +91,24 @@ class PeCAR:
         retrieved_context: str = state.get("retrieved_context", "")
         sources: List[str] = state.get("sources", [])
         eval_scores: Dict[str, float] = state.get("eval_scores", {})
+        max_paths = max(1, int(state.get("pecar_max_paths", 2) or 2))
+        max_steps = max(2, int(state.get("pecar_max_steps", 6) or 6))
+        disable_retrieval = bool(state.get("pecar_disable_retrieval", False))
 
         logger.info("PeCAR pipeline start: mode=%s, query_len=%d", mode, len(query))
 
         # ---- Stage 1: Intent-Aware Strategy Selection ----
         strategy = self.iass.select(intent=intent, mode=mode, learner=learner)
+        if strategy.num_paths > max_paths:
+            strategy.num_paths = max_paths
+        if disable_retrieval:
+            strategy.use_retrieval_grounding = False
         logger.info("Stage 1 complete: %d techniques selected", len(strategy.techniques))
 
         # ---- Stage 2: Adaptive Reasoning Depth ----
         depth_score, num_steps = self.ardc.compute(intent=intent, learner=learner, mode=mode)
+        if num_steps > max_steps:
+            num_steps = max_steps
         logger.info("Stage 2 complete: depth_score=%.4f -> %d steps", depth_score, num_steps)
 
         # ---- Stage 3: Retrieval-Grounded CoT ----

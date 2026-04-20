@@ -41,6 +41,13 @@ class EvaluationDashboard:
         self.structural = StructuralEvaluator()
         self._history: List[Dict[str, Any]] = []
 
+    async def aclose(self) -> None:
+        """Best-effort cleanup for evaluator resources."""
+        if hasattr(self.semantic, "aclose"):
+            await self.semantic.aclose()
+        if hasattr(self.pedagogical, "aclose"):
+            await self.pedagogical.aclose()
+
     async def evaluate(
         self,
         question: str,

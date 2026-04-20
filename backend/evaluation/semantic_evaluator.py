@@ -26,6 +26,11 @@ try:
 except Exception:
     settings = None
 
+try:
+    from utils.json_parsing import parse_llm_json
+except Exception:
+    parse_llm_json = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +38,6 @@ logger = logging.getLogger(__name__)
 def _build_evaluator_llm() -> Optional[Any]:
     if ChatOpenAI is None or HumanMessage is None or settings is None:
         return None
-    if settings.openrouter_api_key:
-        return ChatOpenAI(
-            model=settings.openrouter_model,
-            temperature=0,
-            api_key=settings.openrouter_api_key,
-            base_url="https://openrouter.ai/api/v1",
-            max_tokens=1000,
-        )
     if settings.mistral_api_key:
         return ChatOpenAI(
             model=settings.mistral_model,
@@ -55,6 +52,19 @@ def _build_evaluator_llm() -> Optional[Any]:
 class SemanticEvaluator:
     def __init__(self):
         self.llm = _build_evaluator_llm()
+
+    async def aclose(self) -> None:
+        """Best-effort cleanup for underlying async HTTP clients."""
+        llm = self.llm
+        if llm is None:
+            return
+
+        async_client = getattr(llm, "async_client", None)
+        if async_client is not None:
+            try:
+                await async_client.aclose()
+            except Exception:
+                pass
 
     async def evaluate_teaching_response(
         self,
@@ -76,8 +86,9 @@ class SemanticEvaluator:
             return {}
         try:
             res = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            text = res.content.strip().strip("```json").strip("```").strip()
-            return json.loads(text)
+            if parse_llm_json is None:
+                raise ValueError("JSON parser unavailable")
+            return parse_llm_json(res.content)
         except Exception as exc:
             logger.warning("SemanticEvaluator LLM parse error: %s", exc)
             return {}
@@ -106,6 +117,8 @@ Rate accuracy 0.0-1.0 where:
 Respond with ONLY valid JSON (no markdown):
 {{"accuracy_score": 0.85, "errors": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "accuracy_score" not in data:
+            return self._heuristic_accuracy(question, response, sources)
         return float(data.get("accuracy_score", 0.5))
 
     async def _evaluate_coherence(self, response: str) -> float:
@@ -127,11 +140,14 @@ Rate coherence 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"coherence_score": 0.9, "issues": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "coherence_score" not in data:
+            return self._heuristic_coherence(response)
         return float(data.get("coherence_score", 0.5))
 
     async def _evaluate_coverage(self, question: str, response: str) -> float:
         if self.llm is None:
             return self._heuristic_coverage(question, response)
+        heuristic_score = self._heuristic_coverage(question, response)
         prompt = f"""Evaluate concept coverage in this teaching response.
 
 Question: {question}
@@ -147,7 +163,12 @@ coverage_score = concepts_covered / total_expected_concepts  (0.0-1.0)
 Respond with ONLY valid JSON (no markdown):
 {{"coverage_score": 0.85, "covered": [], "missing": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
-        return float(data.get("coverage_score", 0.5))
+        if not data or "coverage_score" not in data:
+            return heuristic_score
+
+        llm_score = float(data.get("coverage_score", 0.5))
+        # Blend LLM judgement with deterministic keyword coverage for stability.
+        return round((llm_score * 0.6) + (heuristic_score * 0.4), 4)
 
     async def _evaluate_misconceptions(self, response: str) -> float:
         if self.llm is None:
@@ -169,6 +190,8 @@ Rate 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"misconception_score": 0.8, "addressed": [], "missed": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "misconception_score" not in data:
+            return self._heuristic_misconceptions(response)
         return float(data.get("misconception_score", 0.5))
 
     async def _evaluate_evidence_support(self, response: str, sources: List[str]) -> float:
@@ -191,6 +214,8 @@ Rate evidence support 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"evidence_score": 0.9, "unsupported_claims": [], "credibility": "high", "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "evidence_score" not in data:
+            return self._heuristic_evidence_support(response, sources)
         return float(data.get("evidence_score", 0.5))
 
     def _tokenize(self, text: str) -> List[str]:

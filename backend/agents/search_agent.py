@@ -29,6 +29,35 @@ class WebSearchAgent:
     def __init__(self):
         self.client = TavilyClient(api_key=settings.tavily_api_key)
         self._cache = get_search_cache()
+        self.last_error_kind: Optional[str] = None
+        self.last_error_message: Optional[str] = None
+        self.last_multi_status: dict = {}
+
+    @staticmethod
+    def _classify_search_error(error_message: str) -> str:
+        msg = (error_message or "").lower()
+
+        if (
+            "nameresolutionerror" in msg
+            or "failed to resolve" in msg
+            or "getaddrinfo failed" in msg
+            or "dns" in msg
+        ):
+            return "dns_resolution"
+        if (
+            "econnreset" in msg
+            or "max retries exceeded" in msg
+            or "connection" in msg
+            or "httpsconnectionpool" in msg
+        ):
+            return "network_unavailable"
+        if "401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg:
+            return "auth_error"
+
+        return "unknown"
+
+    def get_last_multi_status(self) -> dict:
+        return dict(self.last_multi_status)
 
     # ------------------------------------------------------------------
     # Single-query search (plan-aware + cached)
@@ -48,6 +77,9 @@ class WebSearchAgent:
         with safer defaults (``basic`` depth, no raw content).
         """
         # Resolve effective parameters from plan or kwargs
+        self.last_error_kind = None
+        self.last_error_message = None
+
         depth = plan.search_depth if plan else search_depth
         max_results = plan.max_results if plan else min(settings.max_search_results, 5)
         raw_content = plan.include_raw_content if plan else False
@@ -127,6 +159,9 @@ class WebSearchAgent:
                 f"{len(tavily_images)} images in {elapsed:.2f}s"
             )
 
+            self.last_error_kind = None
+            self.last_error_message = None
+
             # ---------- cache store ----------
             self._cache.put(query, depth, max_results, raw_content, results)
 
@@ -136,9 +171,13 @@ class WebSearchAgent:
             logger.error(
                 f"Tavily search timed out after {timeout_seconds}s for query: {query[:80]}"
             )
+            self.last_error_kind = "timeout"
+            self.last_error_message = f"Timeout after {timeout_seconds}s"
             return []
         except Exception as e:
             logger.error(f"Search error: {e}")
+            self.last_error_kind = self._classify_search_error(str(e))
+            self.last_error_message = str(e)
             return []
 
     # ------------------------------------------------------------------
@@ -162,10 +201,16 @@ class WebSearchAgent:
         seen_urls: set = set()
         all_image_urls: List[str] = []
         seen_image_urls: set = set()
+        failed_queries = 0
+        error_kind_counts: dict = {}
 
         for idx, query in enumerate(effective_queries, 1):
             logger.info(f"Executing web query {idx}/{len(effective_queries)}: {query[:100]}")
             results = await self.search(query, plan=plan)
+            if not results and self.last_error_kind:
+                failed_queries += 1
+                error_kind_counts[self.last_error_kind] = error_kind_counts.get(self.last_error_kind, 0) + 1
+
             for result in results:
                 # Collect images before URL dedup
                 for img_url in result.images:
@@ -197,4 +242,24 @@ class WebSearchAgent:
             f"Multi-query: {len(effective_queries)} queries → "
             f"{len(top_results)} unique results, {len(all_image_urls)} images"
         )
+
+        dominant_error = None
+        if error_kind_counts:
+            dominant_error = max(error_kind_counts.items(), key=lambda item: item[1])[0]
+
+        search_unavailable = (
+            len(effective_queries) > 0
+            and failed_queries == len(effective_queries)
+            and len(top_results) == 0
+            and dominant_error in {"dns_resolution", "network_unavailable", "timeout"}
+        )
+
+        self.last_multi_status = {
+            "total_queries": len(effective_queries),
+            "failed_queries": failed_queries,
+            "error_kind": dominant_error,
+            "search_unavailable": search_unavailable,
+            "last_error_message": self.last_error_message,
+        }
+
         return top_results

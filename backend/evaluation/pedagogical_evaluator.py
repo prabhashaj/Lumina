@@ -26,6 +26,11 @@ try:
 except Exception:
     settings = None
 
+try:
+    from utils.json_parsing import parse_llm_json
+except Exception:
+    parse_llm_json = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +38,6 @@ logger = logging.getLogger(__name__)
 def _build_evaluator_llm() -> Optional[Any]:
     if ChatOpenAI is None or HumanMessage is None or settings is None:
         return None
-    if settings.openrouter_api_key:
-        return ChatOpenAI(
-            model=settings.openrouter_model,
-            temperature=0,
-            api_key=settings.openrouter_api_key,
-            base_url="https://openrouter.ai/api/v1",
-            max_tokens=1000,
-        )
     if settings.mistral_api_key:
         return ChatOpenAI(
             model=settings.mistral_model,
@@ -55,6 +52,19 @@ def _build_evaluator_llm() -> Optional[Any]:
 class PedagogicalEvaluator:
     def __init__(self):
         self.llm = _build_evaluator_llm()
+
+    async def aclose(self) -> None:
+        """Best-effort cleanup for underlying async HTTP clients."""
+        llm = self.llm
+        if llm is None:
+            return
+
+        async_client = getattr(llm, "async_client", None)
+        if async_client is not None:
+            try:
+                await async_client.aclose()
+            except Exception:
+                pass
 
     async def evaluate_teaching_quality(
         self,
@@ -82,8 +92,9 @@ class PedagogicalEvaluator:
             return {}
         try:
             res = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            text = res.content.strip().strip("```json").strip("```").strip()
-            return json.loads(text)
+            if parse_llm_json is None:
+                raise ValueError("JSON parser unavailable")
+            return parse_llm_json(res.content)
         except Exception as exc:
             logger.warning("PedagogicalEvaluator LLM parse error: %s", exc)
             return {}
@@ -104,23 +115,18 @@ class PedagogicalEvaluator:
             return 0.2
         if self.llm is None:
             return self._heuristic_analogy(analogy)
-        prompt = f"""Evaluate the quality of this analogy for teaching "{topic}":
+        prompt = f"""Rate this analogy for teaching "{topic[:60]}" on 0-1 scale.
 
-Analogy: {analogy}
+Analogy: {analogy[:300]}
 
-A good analogy:
-1. Maps a familiar concept to the unfamiliar topic
-2. Highlights essential similarities
-3. Avoids confusing differences
-4. Is easy to visualise
-5. Builds a clear mental model
+Good analogy = familiar concept maps clearly to topic + captures essence + memorable.
+Bad analogy = confusing, misleading, or doesn't clarify.
 
-Rate 0.0-1.0.
-
-Respond with ONLY valid JSON (no markdown):
-{{"analogy_score": 0.8, "strengths": [], "weaknesses": [], "reasoning": "..."}}"""
+{{"score": 0.85}}"""
         data = await self._call(prompt)
-        return float(data.get("analogy_score", 0.5))
+        if not data or "score" not in data:
+            return self._heuristic_analogy(analogy)
+        return float(data.get("score", 0.5))
 
     async def _evaluate_examples(self, topic: str, examples: List[str]) -> float:
         if not examples:
@@ -145,7 +151,10 @@ Rate 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"example_score": 0.85, "strengths": [], "improvements": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
-        example_score = float(data.get("example_score", 0.5))
+        if not data or "example_score" not in data:
+            example_score = self._heuristic_examples(examples)
+        else:
+            example_score = float(data.get("example_score", 0.5))
         return round((example_score * 0.7) + (diversity_score * 0.3), 4)
 
     async def _evaluate_practice_questions(self, topic: str, questions: List[str]) -> float:
@@ -169,6 +178,8 @@ Rate 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"question_quality": 0.8, "strengths": [], "improvements": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "question_quality" not in data:
+            return self._heuristic_practice_questions(questions)
         return float(data.get("question_quality", 0.5))
 
     async def _evaluate_scaffolding(self, tldr: str, detailed: str) -> float:
@@ -193,6 +204,8 @@ Rate scaffolding 0.0-1.0.
 Respond with ONLY valid JSON (no markdown):
 {{"scaffolding_score": 0.85, "progression": "good", "reasoning": "..."}}"""
         data = await self._call(prompt)
+        if not data or "scaffolding_score" not in data:
+            return self._heuristic_scaffolding(tldr, detailed)
         return float(data.get("scaffolding_score", 0.5))
 
     def _evaluate_engagement(self, text: str) -> float:

@@ -10,6 +10,7 @@ export interface Message {
   intent?: any
   tldr?: string
   explanation?: any
+  visualExplanation?: string
   images?: ImageData[]
   sources?: Source[]
   analogy?: string

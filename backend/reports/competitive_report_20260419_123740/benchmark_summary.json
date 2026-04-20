@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "Existing Generic Tutor",
+    "n": 2,
+    "semantic": 0.79665,
+    "pedagogical": 0.40685,
+    "structural": 0.7875,
+    "overall": 0.6389,
+    "pass_rate": 0.0,
+    "latency_s": 3.8793468500007293
+  },
+  {
+    "variant": "Existing Structured RAG",
+    "n": 2,
+    "semantic": 0.76885,
+    "pedagogical": 0.6427,
+    "structural": 0.8458,
+    "overall": 0.7338,
+    "pass_rate": 0.0,
+    "latency_s": 38.6115506999995
+  },
+  {
+    "variant": "Lumina + PeCAR",
+    "n": 2,
+    "semantic": 0.86625,
+    "pedagogical": 0.76875,
+    "structural": 0.9125000000000001,
+    "overall": 0.8365,
+    "pass_rate": 1.0,
+    "latency_s": 65.371521699999
+  }
+]

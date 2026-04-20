@@ -179,7 +179,8 @@ export default function DoubtSolverMode({
         userMessage.content,
         history,
         imageBase64,
-        imageType
+        imageType,
+        currentSessionId
       )
 
       let updated = messagesRef.current.map(m =>

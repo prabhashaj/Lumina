@@ -439,7 +439,7 @@ export default function ExamPrepMode({
           setSavedSessions(loadExamPrepSessions())
         }}
       />
-      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" />
+      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" sessionId={session?.id} />
       </>
     )
   }
@@ -524,7 +524,7 @@ export default function ExamPrepMode({
           )}
         </div>
       </div>
-      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" />
+      <GuideChatbot mode="exam-prep" context={guideContext} title="Study Guide" sessionId={session?.id} />
       </>
     )
   }

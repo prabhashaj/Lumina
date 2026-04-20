@@ -10,9 +10,10 @@ interface ChatInterfaceProps {
   messages: Message[]
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   onMessagesChange?: () => void
+  sessionId?: string | null
 }
 
-export default function ChatInterface({ messages, setMessages, onMessagesChange }: ChatInterfaceProps) {
+export default function ChatInterface({ messages, setMessages, onMessagesChange, sessionId }: ChatInterfaceProps) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
@@ -218,7 +219,14 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
                 }
               } else if (chunk.type === 'source') {
                 if (!lastMessage.sources) lastMessage.sources = []
-                lastMessage.sources.push(chunk.data)
+                const sourceUrl = chunk.data?.url
+                const isDuplicate = sourceUrl
+                  ? lastMessage.sources.some((source: any) => source.url === sourceUrl)
+                  : false
+
+                if (!isDuplicate) {
+                  lastMessage.sources.push(chunk.data)
+                }
               } else if (chunk.type === 'analogy') {
                 lastMessage.analogy = chunk.data
               } else if (chunk.type === 'practice_question') {
@@ -230,11 +238,17 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
                 if (!isDuplicate) {
                   lastMessage.practiceQuestions.push(chunk.data)
                 }
+              } else if (chunk.type === 'error') {
+                lastMessage.isLoading = false
+                lastMessage.error = typeof chunk.data === 'string'
+                  ? chunk.data
+                  : 'Sorry, I encountered an error processing your question. Please try again.'
               } else if (chunk.type === 'complete') {
                 lastMessage.isLoading = false
                 lastMessage.complete = true
                 const fullData = chunk.data
                 lastMessage.content = fullData.tldr || lastMessage.tldr || ''
+                lastMessage.visualExplanation = fullData.visual_explanation || lastMessage.visualExplanation
                 lastMessage.followUpSuggestions = fullData.follow_up_suggestions || []
                 // Save to history on completion
                 setTimeout(() => onMessagesChange?.(), 0)
@@ -246,7 +260,8 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange 
         },
         imageContext || undefined,
         fileContext || undefined,
-        conversationHistory.length > 0 ? conversationHistory : undefined
+        conversationHistory.length > 0 ? conversationHistory : undefined,
+        sessionId || undefined
       )
     } catch (error) {
       console.error('Research error:', error)

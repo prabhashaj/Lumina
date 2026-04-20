@@ -1,11 +1,6 @@
 import type { Metadata } from 'next'
-import { Inter, Caveat, Patrick_Hand } from 'next/font/google'
 import '../styles/globals.css'
 import { AuthProvider } from '@/lib/auth'
-
-const inter = Inter({ subsets: ['latin'] })
-const caveat = Caveat({ subsets: ['latin'], variable: '--font-caveat', weight: ['400', '500', '600', '700'] })
-const patrickHand = Patrick_Hand({ subsets: ['latin'], variable: '--font-patrick', weight: '400' })
 
 export const metadata: Metadata = {
   title: 'Lumina',
@@ -19,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" data-scroll-behavior="smooth">
-      <body className={`${inter.className} ${caveat.variable} ${patrickHand.variable}`}>
+      <body>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

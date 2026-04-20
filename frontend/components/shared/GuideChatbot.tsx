@@ -22,6 +22,7 @@ interface GuideChatbotProps {
   mode: 'exam-prep' | 'personalized' | 'video-lecture'
   context: string
   title?: string
+  sessionId?: string | null
 }
 
 const modeConfig: Record<string, { label: string; greeting: string }> = {
@@ -42,7 +43,7 @@ const modeConfig: Record<string, { label: string; greeting: string }> = {
   },
 }
 
-export default function GuideChatbot({ mode, context, title }: GuideChatbotProps) {
+export default function GuideChatbot({ mode, context, title, sessionId }: GuideChatbotProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const [messages, setMessages] = useState<GuideMessage[]>([])
@@ -113,7 +114,7 @@ export default function GuideChatbot({ mode, context, title }: GuideChatbotProps
         .filter((m) => m.id !== 'greeting' || m.role === 'assistant')
         .map((m) => ({ role: m.role, content: m.content }))
 
-      const result = await guideChat(userMessage.content, mode, context, history)
+      const result = await guideChat(userMessage.content, mode, context, history, sessionId || undefined)
 
       setMessages((prev) =>
         prev.map((m) =>

@@ -80,7 +80,104 @@ Extract ALL of the following (be thorough — include specific details, not vagu
 
 IMPORTANT: Be detailed and specific. Include actual numbers, names, and facts — not just "there are several types." A teacher should be able to build a complete lesson from your extraction alone.
 
+GROUNDING RULES:
+- Preserve the source's exact facts, names, numbers, and relationships.
+- Do not infer missing details, generalize beyond the source, or add outside knowledge.
+- If a fact is unclear or unsupported, omit it rather than guessing.
+
 Return clean, well-structured text organized by the categories above. Skip categories that have no relevant content in the source.
+"""
+
+# ================================
+# Comparative Analysis (for "Compare X vs Y" questions)
+# ================================
+
+COMPARATIVE_EXTRACTION_PROMPT = """Extract content specifically for a comparative analysis.
+
+Topic: {topic}
+Query: {query}
+Source Content: {content}
+
+This is a COMPARISON question. Extract BOTH:
+
+**A. How X Works / Characteristics of X:**
+- Detailed explanation of mechanism
+- Key advantages/strengths
+- Limitations/disadvantages
+- Use cases where it's better
+- Specific metrics/performance data
+- Real examples or implementations
+
+**B. How Y Works / Characteristics of Y:**
+- Detailed explanation of mechanism
+- Key advantages/strengths
+- Limitations/disadvantages
+- Use cases where it's better
+- Specific metrics/performance data
+- Real examples or implementations
+
+**C. Direct Comparisons & Trade-offs:**
+- Explicit similarities (what they share)
+- Explicit differences (key contrasts)
+- Performance trade-offs (speed vs memory, etc.)
+- Suitability by context (when to use X, when to use Y)
+- Historical evolution (which came first, how they evolved)
+- Why both exist (different solutions to different problems)
+
+**D. Code/Technical Examples (if applicable):**
+- Side-by-side code examples
+- Syntax differences
+- Performance characteristics
+- Common patterns for each
+
+Be specific and detailed. Include exact metrics, numbers, and real-world examples. The teacher needs concrete material to explain trade-offs clearly.
+
+GROUNDING RULES:
+- Keep X and Y distinct and do not merge facts from one into the other.
+- Only include comparisons that are explicitly supported by the source material.
+- If the source does not support a trade-off, state that it was not found instead of inventing one.
+"""
+
+# ================================
+# Semantic Verification (fact-checking)
+# ================================
+
+SEMANTIC_VERIFICATION_PROMPT = """Verify the semantic accuracy and completeness of this teaching response.
+
+Question: {question}
+Response: {response}
+Sources: {sources}
+
+DETAILED FACT-CHECKING:
+
+1. **Factual Claims** — List each major factual claim. Is it:
+   - Directly supported by sources? 
+   - Contradicted by sources?
+   - Mentioned but not verified?
+   
+2. **Missing Key Facts** — What important information from sources is NOT in the response?
+
+3. **Unsupported Claims** — Any claims not grounded in provided sources?
+
+4. **Specific Numbers/Data** — Are statistics and measurements exact and attributed?
+
+5. **Concept Completeness** — For a comparison question, are both sides fairly represented?
+
+6. **Evidence Quality** — Are examples and analogies grounded in sources?
+
+Return JSON:
+{{
+    "accuracy_score": 0.0-1.0,
+    "verified_claims": 5,
+    "unverified_claims": 2,
+    "contradicted_claims": 0,
+    "critical_gaps": ["missing X", "missing Y"],
+    "confidence": 0.0-1.0,
+    "revision_needed": true|false,
+    "specific_improvements": ["Add metric X from source 2", "Clarify trade-off between Y and Z"]
+}}
+
+Score 1.0 only if all major claims are verified and key facts are included.
 """
 
 # ================================
@@ -190,6 +287,32 @@ Generate 5-6 actual questions that progressively test deeper understanding:
 CRITICAL: Write ACTUAL specific questions with question marks. Each question should reference specific concepts from this lesson. Do NOT write generic labels like "Basic Recall" or "Application."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPECIAL HANDLING FOR COMPARISON QUESTIONS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+If question contains "compare", "versus", "difference", "trade-off", or similar:
+
+### 1. [X: Mechanism & Context]
+[Detailed explanation of X, its strengths, when to use it. Use specific examples and metrics from research.]
+
+### 2. [Y: Mechanism & Context]
+[Detailed explanation of Y, its strengths, when to use it. Use specific examples and metrics from research.]
+
+### 3. [Key Differences & Trade-offs]
+[Direct comparison table or detailed analysis of:
+- Performance (speed, memory, efficiency)
+- Readability and maintainability
+- Use-case suitability
+- Learning curve / complexity
+- Production readiness
+Present each trade-off with concrete evidence from research.]
+
+### 4. [When to Use X vs Y]
+[Decision criteria: specific scenarios, project types, constraints, requirements that favor one over the other. Use real examples.]
+
+### 5. [Implementation Considerations]
+[Practical guidance: pitfalls, optimization tricks, hybrid approaches. Include code patterns or pseudo-code if applicable.]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 QUALITY STANDARDS — YOUR RESPONSE MUST:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. Be THOROUGH — a student should not need to search elsewhere after reading this
@@ -202,6 +325,12 @@ QUALITY STANDARDS — YOUR RESPONSE MUST:
 8. Build concepts progressively — each section flows naturally into the next
 9. Use formatting (bold, italics, bullet points) to aid readability
 10. Address common misconceptions to deepen true understanding
+
+GROUNDING RULES:
+- Use only the facts present in the research block or clearly established general knowledge.
+- If a detail is uncertain, say so explicitly instead of guessing.
+- Do not invent statistics, timelines, names, or examples.
+- Prefer fewer claims that are well-supported over many claims that are loosely supported.
 """
 
 TEACHING_SYNTHESIS_BEGINNER = """
@@ -215,6 +344,8 @@ Additional instructions for BEGINNER level:
 - Use "Imagine..." and "Think of it like..." frequently to build mental models
 - After each concept, briefly summarize it in one simple sentence before moving on
 - Provide extra examples for difficult points
+
+FOR SPEED: Focus on 3-4 key subsections max. Get to the core insight fast, then reinforce.
 """
 
 TEACHING_SYNTHESIS_INTERMEDIATE = """
@@ -227,12 +358,14 @@ Additional instructions for INTERMEDIATE level:
 - Provide worked examples with step-by-step reasoning
 - Challenge the student with "Think about why..." moments
 - Include relevant historical context or evolution of ideas where it adds understanding
+
+FOR SPEED: Prioritize trade-offs and practical applications. Use 4-5 focused subsections.
 """
 
 TEACHING_SYNTHESIS_ADVANCED = """
 Additional instructions for ADVANCED level:
 - Use precise, field-specific technical language throughout
-- Discuss edge cases, exceptions, and boundary conditions
+- Discuss edge cases, exceptions, and boundary conditions  
 - Reference underlying mathematical frameworks, theoretical foundations, or first principles
 - Go deep into mechanisms — explain not just "how" but "why this way and not another"
 - Discuss current research frontiers, open questions, and active debates in the field
@@ -240,6 +373,8 @@ Additional instructions for ADVANCED level:
 - Compare competing models, theories, or approaches with their trade-offs
 - Address subtle misconceptions that even experienced practitioners make
 - Connect to adjacent fields and interdisciplinary implications
+
+FOR SPEED: Lead with the theoretical framework. Assume context. Omit basic details. Use 4 focused sections max.
 """
 
 # ================================

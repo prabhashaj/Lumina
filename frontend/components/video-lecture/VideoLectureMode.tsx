@@ -444,7 +444,7 @@ export default function VideoLectureMode({
           </div>
         </div>
       </div>
-      <GuideChatbot mode="video-lecture" context={guideContext} title="Lecture Assistant" />
+      <GuideChatbot mode="video-lecture" context={guideContext} title="Lecture Assistant" sessionId={sessionId} />
       </>
     )
   }

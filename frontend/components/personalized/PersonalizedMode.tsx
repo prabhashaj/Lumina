@@ -244,7 +244,7 @@ export default function PersonalizedMode({
         onBack={handleBackToPlan}
         onMarkComplete={handleMarkComplete}
       />
-      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" />
+      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" sessionId={session?.id} />
       </>
     )
   }
@@ -273,7 +273,7 @@ export default function PersonalizedMode({
           setSavedSessions(loadPersonalizedSessions())
         }}
       />
-      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" />
+      <GuideChatbot mode="personalized" context={guideContext} title="Learning Guide" sessionId={session?.id} />
       </>
     )
   }

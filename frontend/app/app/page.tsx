@@ -285,6 +285,7 @@ export default function AppPage() {
               messages={messages}
               setMessages={setMessages}
               onMessagesChange={handleMessagesChange}
+              sessionId={activeSessionId}
             />
           ) : mode === 'exam-prep' ? (
             <ExamPrepMode

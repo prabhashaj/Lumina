@@ -41,6 +41,8 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+backend/test_output.txt
+backend/test_run_output*.txt
 
 # Next.js
 .next/

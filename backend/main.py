@@ -2,6 +2,7 @@
 FastAPI main application
 """
 import sys
+import asyncio
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -22,85 +23,145 @@ from graph.orchestrator import ResearchOrchestrator
 from shared.schemas.models import ResearchRequest, TeachingResponse
 from tools.cost_tracking import start_tracking, summarize_cost, record_tavily_search
 
+try:
+    from utils.json_parsing import parse_llm_json
+except Exception:
+    parse_llm_json = None
+
 
 def _safe_json_loads(raw: str) -> dict:
     """Parse JSON from LLM output, handling various malformed JSON issues."""
-    import re as _re
+    if parse_llm_json is not None:
+        return parse_llm_json(raw)
 
-    # Step 1: Try direct parse
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
+    return json.loads(raw)
 
-    # Step 2: Clean common LLM JSON issues
-    cleaned = raw
-    # Remove control characters except \n \r \t (fixes "Invalid control character" errors)
-    cleaned = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', cleaned)
-    # Remove trailing commas before } or ]
-    cleaned = _re.sub(r',\s*([}\]])', r'\1', cleaned)
-    # Fix invalid escape sequences
-    cleaned = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
 
-    # Step 3: Try to extract just the outermost JSON object more carefully
-    # Find the first { and match braces
-    start = raw.find('{')
-    if start == -1:
-        raise ValueError("No JSON object found in LLM response")
-
-    depth = 0
-    in_string = False
-    escape_next = False
-    end = start
-    for i in range(start, len(raw)):
-        c = raw[i]
-        if escape_next:
-            escape_next = False
-            continue
-        if c == '\\':
-            escape_next = True
-            continue
-        if c == '"' and not escape_next:
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if c == '{':
-            depth += 1
-        elif c == '}':
-            depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-
-    extracted = raw[start:end]
-    # Clean the extracted JSON
-    extracted = _re.sub(r',\s*([}\]])', r'\1', extracted)
-    extracted = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', extracted)
-    try:
-        return json.loads(extracted)
-    except json.JSONDecodeError:
-        pass
-
-    # Step 4: Last resort — use ast.literal_eval-style cleanup
-    # Remove control characters except \n \r \t
-    extracted = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', extracted)
-    # Replace single quotes with double quotes (in case LLM used Python-style)
-    try:
-        return json.loads(extracted)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse failed after all fixes. Error: {e}")
-        logger.error(f"First 500 chars of raw: {raw[:500]}")
-        raise ValueError(f"Could not parse JSON from LLM response: {e}")
+def _model_to_dict(obj):
+    """Serialize Pydantic v2/v1 models safely without deprecation warnings."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    return obj
 
 
 def _attach_cost(payload: dict) -> dict:
     payload["cost"] = summarize_cost()
     return payload
+
+
+# Processing time tracking
+import time as _time
+_request_start_time = None
+
+def _start_timing():
+    """Start timing a request"""
+    global _request_start_time
+    _request_start_time = _time.time()
+
+def _get_processing_time() -> float:
+    """Get elapsed time in seconds since start_timing() was called"""
+    global _request_start_time
+    if _request_start_time is None:
+        return 0.0
+    return round(_time.time() - _request_start_time, 3)
+
+
+# Session-scoped conversational memory (fallback when client sends partial/no history)
+_SESSION_MEMORY_TTL_SECONDS = 6 * 60 * 60
+_SESSION_MEMORY_MAX_MESSAGES = 40
+_session_memory_store = {}
+
+
+def _session_memory_key(mode: str, session_id: str, user_id: str = "") -> str:
+    safe_mode = (mode or "general").strip().lower()
+    safe_session = (session_id or "").strip()
+    safe_user = (user_id or "").strip()
+    return f"{safe_mode}:{safe_user}:{safe_session}"
+
+
+def _normalize_history_items(history, max_messages: int = 20):
+    cleaned = []
+    if not isinstance(history, list):
+        return cleaned
+
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "user")).strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        cleaned.append({"role": role, "content": content})
+
+    return cleaned[-max_messages:]
+
+
+def _prune_session_memory() -> None:
+    now = _time.time()
+    stale_keys = []
+    for key, entry in _session_memory_store.items():
+        if now - entry.get("updated_at", 0) > _SESSION_MEMORY_TTL_SECONDS:
+            stale_keys.append(key)
+    for key in stale_keys:
+        _session_memory_store.pop(key, None)
+
+
+def _get_session_history(mode: str, session_id: str, user_id: str = ""):
+    if not session_id:
+        return []
+    _prune_session_memory()
+    key = _session_memory_key(mode, session_id, user_id)
+    entry = _session_memory_store.get(key)
+    if not entry:
+        return []
+    return list(entry.get("history", []))
+
+
+def _save_session_history(mode: str, session_id: str, history, user_id: str = "") -> None:
+    if not session_id:
+        return
+    key = _session_memory_key(mode, session_id, user_id)
+    normalized = _normalize_history_items(history, max_messages=_SESSION_MEMORY_MAX_MESSAGES)
+    _session_memory_store[key] = {
+        "history": normalized,
+        "updated_at": _time.time(),
+    }
+
+
+def _resolve_effective_history(mode: str, incoming_history, session_id: str = "", user_id: str = ""):
+    normalized_incoming = _normalize_history_items(incoming_history, max_messages=_SESSION_MEMORY_MAX_MESSAGES)
+    if normalized_incoming:
+        _save_session_history(mode, session_id, normalized_incoming, user_id)
+        return normalized_incoming
+    return _get_session_history(mode, session_id, user_id)
+
+
+def _append_session_turn(
+    mode: str,
+    session_id: str,
+    user_text: str,
+    assistant_text: str,
+    user_id: str = "",
+    base_history=None,
+) -> None:
+    if not session_id:
+        return
+
+    history = _normalize_history_items(base_history or _get_session_history(mode, session_id, user_id), max_messages=_SESSION_MEMORY_MAX_MESSAGES)
+
+    user_msg = (user_text or "").strip()
+    assistant_msg = (assistant_text or "").strip()
+
+    if user_msg:
+        history.append({"role": "user", "content": user_msg})
+    if assistant_msg:
+        history.append({"role": "assistant", "content": assistant_msg})
+
+    _save_session_history(mode, session_id, history, user_id)
 
 
 # Initialize logger
@@ -121,6 +182,15 @@ except Exception:
 
 # Global orchestrator instance
 orchestrator = None
+
+
+def _ensure_orchestrator() -> ResearchOrchestrator:
+    """Return a ready orchestrator, lazily initializing when needed."""
+    global orchestrator
+    if orchestrator is None:
+        logger.warning("Orchestrator was None at request time; attempting lazy initialization")
+        orchestrator = ResearchOrchestrator()
+    return orchestrator
 
 
 @asynccontextmanager
@@ -177,26 +247,30 @@ app.add_middleware(CORSHandler)
 @app.get("/")
 async def root():
     """Health check endpoint"""
+    _start_timing()
     start_tracking()
     return _attach_cost({
         "status": "healthy",
         "service": "AI Research Teaching Agent",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "processing_time": _get_processing_time()
     })
 
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    _start_timing()
     start_tracking()
     return _attach_cost({
         "status": "healthy",
         "orchestrator": orchestrator is not None,
         "settings": {
-            "llm_model": settings.openrouter_model or settings.mistral_model,
+            "llm_model": settings.mistral_model,
             "max_search_results": settings.max_search_results,
             "max_images": settings.max_images_per_response
-        }
+        },
+        "processing_time": _get_processing_time()
     })
 
 
@@ -208,15 +282,7 @@ def _get_code_ai_llm():
     """Lazy-init an LLM for the code tutor using Mistral."""
     global _code_ai_llm
     if _code_ai_llm is None:
-        if settings.openrouter_api_key:
-            _code_ai_llm = ChatOpenAI(
-                model=settings.openrouter_model,
-                temperature=0.7,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                max_tokens=4000
-            )
-        elif settings.mistral_api_key:
+        if settings.mistral_api_key:
             _code_ai_llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
@@ -225,11 +291,11 @@ def _get_code_ai_llm():
                 max_tokens=4000
             )
         else:
-            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+            raise ValueError("No valid API key found. Please set MISTRAL_API_KEY")
     return _code_ai_llm
 
 
-# ─── Doubt Solver (Optimized with OpenRouter Free Router) ───────────────────
+# ─── Doubt Solver (Mistral API) ──────────────────────────────────────────────
 
 _doubt_solver_llm = None
 _doubt_solver_backup_llm = None
@@ -263,12 +329,12 @@ async def _invoke_doubt_solver_llm(messages):
             if affordable and affordable >= 256:
                 retry_max_tokens = max(256, min(3000, affordable - 64))
                 logger.warning(
-                    f"Doubt Solver hit OpenRouter credit cap; retrying with max_tokens={retry_max_tokens}"
+                    f"Doubt Solver token cap reached; retrying with max_tokens={retry_max_tokens}"
                 )
                 return await llm.bind(max_tokens=retry_max_tokens).ainvoke(messages)
 
             if _doubt_solver_backup_llm is not None:
-                logger.warning("Doubt Solver OpenRouter credit error; falling back to Mistral API")
+                logger.warning("Doubt Solver primary call failed; falling back to backup Mistral call")
                 return await _doubt_solver_backup_llm.ainvoke(messages)
         raise
 
@@ -278,25 +344,8 @@ def _get_doubt_solver_llm():
     """
     global _doubt_solver_llm, _doubt_solver_backup_llm
     if _doubt_solver_llm is None:
-        if settings.openrouter_api_key:
-            logger.info("Initializing Doubt Solver with Mistral Small via OpenRouter")
-            _doubt_solver_llm = ChatOpenAI(
-                model=settings.openrouter_model,
-                temperature=0.7,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                max_tokens=3000
-            )
-            if settings.mistral_api_key:
-                _doubt_solver_backup_llm = ChatOpenAI(
-                    model=settings.mistral_model,
-                    temperature=0.7,
-                    api_key=settings.mistral_api_key,
-                    base_url="https://api.mistral.ai/v1",
-                    max_tokens=3000
-                )
-        elif settings.mistral_api_key:
-            logger.info("Initializing Doubt Solver with Mistral Medium via Mistral API")
+        if settings.mistral_api_key:
+            logger.info("Initializing Doubt Solver with Mistral API")
             _doubt_solver_llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
@@ -305,7 +354,7 @@ def _get_doubt_solver_llm():
                 max_tokens=3000
             )
         else:
-            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+            raise ValueError("No valid API key found. Please set MISTRAL_API_KEY")
     return _doubt_solver_llm
 
 
@@ -318,6 +367,7 @@ async def code_ai_chat(request: dict):
     Returns: { response: str }
     """
     try:
+        _start_timing()
         start_tracking()
         from langchain_core.messages import SystemMessage, HumanMessage as HMsg, AIMessage
 
@@ -363,7 +413,7 @@ async def code_ai_chat(request: dict):
         messages.append(HMsg(content=full_user_message))
 
         result = await llm.ainvoke(messages)
-        return _attach_cost({"response": result.content})
+        return _attach_cost({"response": result.content, "processing_time": _get_processing_time()})
 
     except Exception as e:
         logger.error(f"Code AI chat error: {str(e)}")
@@ -383,18 +433,50 @@ async def research_question(request: ResearchRequest):
     5. Synthesize teaching-quality explanations
     """
     try:
+        _start_timing()
         start_tracking()
+        
+        # Validate question length
+        question = request.question.strip()
+        if len(question) < 3:
+            raise HTTPException(status_code=400, detail="Question must be at least 3 characters long")
+        if len(question) > 2000:
+            raise HTTPException(status_code=400, detail="Question must not exceed 2000 characters")
+        
         logger.info(f"Received research request: {request.question[:100]}...")
         
-        if not orchestrator:
-            raise HTTPException(status_code=503, detail="Service not initialized")
+        try:
+            ready_orchestrator = _ensure_orchestrator()
+        except Exception as init_error:
+            raise HTTPException(status_code=503, detail=f"Service not initialized: {init_error}")
         
+        effective_history = _resolve_effective_history(
+            mode="research",
+            incoming_history=request.conversation_history,
+            session_id=request.session_id or "",
+            user_id=request.user_id or "",
+        )
+        effective_request = request.model_copy(update={"conversation_history": effective_history})
+
         # Process through the orchestrator
-        response = await orchestrator.process_question(request)
+        response = await ready_orchestrator.process_question(effective_request)
+
+        _append_session_turn(
+            mode="research",
+            session_id=request.session_id or "",
+            user_id=request.user_id or "",
+            user_text=request.question,
+            assistant_text=(response.tldr or response.explanation.content[:300]),
+            base_history=effective_history,
+        )
         
+        # Add processing time
+        response.processing_time = _get_processing_time()
         response.cost = summarize_cost()
         return response
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Research error: {str(e)}")
         raise HTTPException(
@@ -414,8 +496,15 @@ async def research_question_stream(request: ResearchRequest):
     async def generate_stream():
         """Generate streaming response"""
         try:
+            _start_timing()
             start_tracking()
             logger.info(f"Starting streaming research: {request.question[:100]}...")
+
+            try:
+                ready_orchestrator = _ensure_orchestrator()
+            except Exception as init_error:
+                yield f"data: {json.dumps({'type': 'error', 'data': f'Service not initialized: {init_error}'})}\n\n"
+                return
             
             # Send status update: Starting
             yield f"data: {json.dumps({'type': 'status', 'data': 'Analyzing question...'})}\n\n"
@@ -427,23 +516,73 @@ async def research_question_stream(request: ResearchRequest):
             if request.file_context:
                 enriched_question += f"\n\n[User attached a document with the following content:\n{request.file_context[:5000]}]"
             
+            effective_history = _resolve_effective_history(
+                mode="research",
+                incoming_history=request.conversation_history,
+                session_id=request.session_id or "",
+                user_id=request.user_id or "",
+            )
+
             # Create enriched request
             enriched_request = ResearchRequest(
                 question=enriched_question,
-                conversation_history=request.conversation_history,
+                conversation_history=effective_history,
                 user_id=request.user_id,
                 session_id=request.session_id
             )
-            
-            # Classify intent
-            intent = await orchestrator.intent_agent.analyze(enriched_question)
-            yield f"data: {json.dumps({'type': 'status', 'data': f'Difficulty: {intent.difficulty_level.value}', 'intent': intent.dict()})}\n\n"
-            
-            # Search
-            yield f"data: {json.dumps({'type': 'status', 'data': 'Searching the web...'})}\n\n"
-            
-            # Run full workflow
-            response = await orchestrator.process_question(enriched_request)
+
+            progress_queue: asyncio.Queue = asyncio.Queue()
+
+            def _on_progress(message: str) -> None:
+                try:
+                    progress_queue.put_nowait(message)
+                except Exception:
+                    pass
+
+            # Run full workflow while streaming internal step updates
+            workflow_task = asyncio.create_task(
+                ready_orchestrator.process_question(
+                    enriched_request,
+                    progress_callback=_on_progress,
+                )
+            )
+
+            last_stage = "Searching the web..."
+            idle_ticks = 0
+
+            while not workflow_task.done():
+                try:
+                    stage = await asyncio.wait_for(progress_queue.get(), timeout=2.0)
+                    stage = (stage or "").strip()
+                    if stage:
+                        last_stage = stage
+                        idle_ticks = 0
+                        logger.info(f"STREAM stage: {stage}")
+                        yield f"data: {json.dumps({'type': 'status', 'data': stage})}\n\n"
+                except asyncio.TimeoutError:
+                    idle_ticks += 1
+                    # Keep the client informed during slow network/model calls.
+                    if idle_ticks % 4 == 0:
+                        heartbeat = f"Still working: {last_stage}"
+                        logger.info(f"STREAM heartbeat: {heartbeat}")
+                        yield f"data: {json.dumps({'type': 'status', 'data': heartbeat})}\n\n"
+
+            response = await workflow_task
+
+            _append_session_turn(
+                mode="research",
+                session_id=request.session_id or "",
+                user_id=request.user_id or "",
+                user_text=request.question,
+                assistant_text=(response.tldr or response.explanation.content[:300]),
+                base_history=effective_history,
+            )
+
+            while not progress_queue.empty():
+                stage = (progress_queue.get_nowait() or "").strip()
+                if stage:
+                    logger.info(f"STREAM stage: {stage}")
+                    yield f"data: {json.dumps({'type': 'status', 'data': stage})}\n\n"
             
             # Stream the complete response
             yield f"data: {json.dumps({'type': 'status', 'data': 'Synthesizing teaching content...'})}\n\n"
@@ -453,15 +592,15 @@ async def research_question_stream(request: ResearchRequest):
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
             
             # Send explanation
-            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
             
             # Send images
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
             
             # Send sources
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
             
             # Send analogy
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
@@ -476,10 +615,12 @@ async def research_question_stream(request: ResearchRequest):
             if response.pecar_metrics:
                 yield f"data: {json.dumps({'type': 'pecar_metrics', 'data': response.pecar_metrics})}\n\n"
 
+            # Add processing time
+            response.processing_time = _get_processing_time()
             response.cost = summarize_cost()
 
-            # Send complete signal
-            yield f"data: {json.dumps({'type': 'complete', 'data': response.dict()})}\n\n"
+            # Send complete signal with full response
+            yield f"data: {json.dumps({'type': 'complete', 'data': _model_to_dict(response)})}\n\n"
             
         except Exception as e:
             logger.error(f"Streaming error: {str(e)}")
@@ -499,20 +640,22 @@ async def research_question_stream(request: ResearchRequest):
 @app.get("/api/config")
 async def get_config():
     """Get current configuration (non-sensitive)"""
+    _start_timing()
     start_tracking()
     return _attach_cost({
         "max_search_results": settings.max_search_results,
         "max_images_per_response": settings.max_images_per_response,
         "cache_ttl": settings.cache_ttl,
         "supported_models": {
-            "llm_primary": settings.openrouter_model,
-            "llm_backup": settings.mistral_model,
+            "llm_primary": settings.mistral_model,
+            "llm_backup": None,
             "embedding": settings.embedding_model
         },
         "features": {
             "tts_enabled": bool(settings.elevenlabs_api_key),
             "file_upload": True
-        }
+        },
+        "processing_time": _get_processing_time()
     })
 
 
@@ -520,6 +663,7 @@ async def get_config():
 async def upload_image(file: UploadFile = File(...), question: str = Form("")):
     """Upload an image and return preview URL (VLM analysis removed)"""
     try:
+        _start_timing()
         start_tracking()
         logger.info(f"Received image upload: {file.filename}, size: {file.size}")
         
@@ -539,7 +683,8 @@ async def upload_image(file: UploadFile = File(...), question: str = Form("")):
             "filename": file.filename,
             "content_type": file.content_type,
             "analysis": "Image uploaded successfully. Describe the image in your question for best results.",
-            "preview_url": data_url
+            "preview_url": data_url,
+            "processing_time": _get_processing_time()
         })
         
     except HTTPException:
@@ -553,6 +698,7 @@ async def upload_image(file: UploadFile = File(...), question: str = Form("")):
 async def upload_and_extract_file(file: UploadFile = File(...)):
     """Upload a document (PDF, DOCX, TXT) and extract its text content"""
     try:
+        _start_timing()
         start_tracking()
         logger.info(f"Received file upload: {file.filename}")
         
@@ -598,7 +744,8 @@ async def upload_and_extract_file(file: UploadFile = File(...)):
             "filename": file.filename,
             "content_type": file.content_type,
             "extracted_text": extracted_text,
-            "char_count": len(extracted_text)
+            "char_count": len(extracted_text),
+            "processing_time": _get_processing_time()
         })
         
     except HTTPException:
@@ -612,6 +759,8 @@ async def upload_and_extract_file(file: UploadFile = File(...)):
 async def text_to_speech(request: dict):
     """Convert text to speech using ElevenLabs API"""
     try:
+        _start_timing()
+        start_tracking()
         text = request.get("text", "")
         if not text:
             raise HTTPException(status_code=400, detail="No text provided")
@@ -622,7 +771,11 @@ async def text_to_speech(request: dict):
         
         if not settings.elevenlabs_api_key:
             # Fallback: Use browser TTS (return empty with flag)
-            return Response(content=b"", media_type="audio/mpeg", headers={"X-Use-Browser-TTS": "true"})
+            return _attach_cost({
+                "audio": "",
+                "use_browser_tts": True,
+                "processing_time": _get_processing_time()
+            })
         
         # Use ElevenLabs API
         import httpx
@@ -668,6 +821,7 @@ async def text_to_speech(request: dict):
 async def generate_exam_roadmap(request: dict):
     """Generate a chapter-wise syllabus/roadmap for a subject"""
     try:
+        _start_timing()
         start_tracking()
         subject = request.get("subject", "").strip()
         if not subject:
@@ -717,7 +871,8 @@ Return ONLY valid JSON in this exact format:
         if not json_match:
             raise ValueError("Could not parse roadmap from LLM response")
 
-        roadmap = json.loads(json_match.group())
+        roadmap = _safe_json_loads(json_match.group())
+        roadmap["processing_time"] = _get_processing_time()
         return _attach_cost(roadmap)
 
     except HTTPException:
@@ -742,6 +897,7 @@ async def generate_topic_content_stream(request: dict):
 
     async def generate_stream():
         try:
+            _start_timing()
             start_tracking()
             if not orchestrator:
                 yield f"data: {json.dumps({'type': 'error', 'data': 'Service not initialized'})}\n\n"
@@ -755,21 +911,25 @@ async def generate_topic_content_stream(request: dict):
             yield f"data: {json.dumps({'type': 'status', 'data': 'Synthesizing content...'})}\n\n"
             yield f"data: {json.dumps({'type': 'topic', 'data': topic})}\n\n"
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
-            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
 
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
 
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
 
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
 
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
-            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
-            yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
+            response_dict = _model_to_dict(response)
+            response_dict["processing_time"] = _get_processing_time()
+            response_dict["cost"] = summarize_cost()
+            
+            yield f"data: {json.dumps({'type': 'cost', 'data': response_dict['cost']})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'data': response_dict})}\n\n"
 
         except Exception as e:
             logger.error(f"Topic content streaming error: {str(e)}")
@@ -790,6 +950,7 @@ async def generate_topic_content_stream(request: dict):
 async def generate_topic_quiz(request: dict):
     """Generate a quiz for a specific topic"""
     try:
+        _start_timing()
         start_tracking()
         subject = request.get("subject", "")
         chapter = request.get("chapter", "")
@@ -834,21 +995,11 @@ Return ONLY valid JSON in this exact format:
         # Try multiple LLM providers for reliability
         llm_candidates = []
 
-        # Priority 1: Teaching agent's LLM (already using OpenRouter)
+        # Priority 1: Teaching agent's LLM
         if orchestrator.teaching_agent:
             llm_candidates.append(("teaching_agent", orchestrator.teaching_agent.llm))
 
-        # Priority 2: OpenRouter Mistral Small
-        if settings.openrouter_api_key:
-            llm_candidates.append(("openrouter_mistral", ChatOpenAI(
-                model=settings.openrouter_model,
-                temperature=0.7,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                max_tokens=4000
-            )))
-
-        # Priority 3: Mistral Medium via API
+        # Priority 2: Mistral API
         if settings.mistral_api_key:
             llm_candidates.append(("mistral", ChatOpenAI(
                 model=settings.mistral_model,
@@ -878,7 +1029,7 @@ Return ONLY valid JSON in this exact format:
         if not json_match:
             raise ValueError("Could not parse quiz from LLM response")
 
-        quiz_data = json.loads(json_match.group())
+        quiz_data = _safe_json_loads(json_match.group())
 
         # Validate quiz structure
         questions = quiz_data.get("questions", [])
@@ -896,6 +1047,7 @@ Return ONLY valid JSON in this exact format:
             if "explanation" not in q:
                 q["explanation"] = "See the topic content for detailed explanation."
 
+        quiz_data["processing_time"] = _get_processing_time()
         return _attach_cost(quiz_data)
 
     except HTTPException:
@@ -915,6 +1067,7 @@ Return ONLY valid JSON in this exact format:
 async def generate_assessment(request: dict):
     """Generate adaptive assessment questions to gauge the user's knowledge level on a topic"""
     try:
+        _start_timing()
         start_tracking()
         topic = request.get("topic", "").strip()
         if not topic:
@@ -968,6 +1121,7 @@ Return ONLY valid JSON in this exact format:
 
         raw_json = json_match.group()
         assessment = _safe_json_loads(raw_json)
+        assessment["processing_time"] = _get_processing_time()
         return _attach_cost(assessment)
 
     except HTTPException:
@@ -981,6 +1135,7 @@ Return ONLY valid JSON in this exact format:
 async def analyze_learner_profile(request: dict):
     """Analyze assessment answers to build a detailed learner profile"""
     try:
+        _start_timing()
         start_tracking()
         topic = request.get("topic", "").strip()
         questions = request.get("questions", [])
@@ -1111,6 +1266,7 @@ Rules:
 
                 raw_json = json_match.group()
                 profile = _safe_json_loads(raw_json)
+                profile["processing_time"] = _get_processing_time()
                 return _attach_cost(profile)
             except (json.JSONDecodeError, ValueError) as e:
                 last_error = e
@@ -1174,6 +1330,7 @@ Provide a comprehensive, personalized explanation."""
 
     async def generate_stream():
         try:
+            _start_timing()
             start_tracking()
             if not orchestrator:
                 yield f"data: {json.dumps({'type': 'error', 'data': 'Service not initialized'})}\n\n"
@@ -1187,21 +1344,25 @@ Provide a comprehensive, personalized explanation."""
             yield f"data: {json.dumps({'type': 'status', 'data': 'Tailoring explanation to your learning style...'})}\n\n"
             yield f"data: {json.dumps({'type': 'topic', 'data': topic})}\n\n"
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
-            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
 
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
 
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
 
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
 
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
-            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
-            yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
+            response_dict = _model_to_dict(response)
+            response_dict["processing_time"] = _get_processing_time()
+            response_dict["cost"] = summarize_cost()
+            
+            yield f"data: {json.dumps({'type': 'cost', 'data': response_dict['cost']})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'data': response_dict})}\n\n"
 
         except Exception as e:
             logger.error(f"Personalized content streaming error: {str(e)}")
@@ -1312,6 +1473,7 @@ async def generate_video_lecture(request: dict):
     Returns the full presentation JSON including per-slide audio.
     """
     try:
+        _start_timing()
         start_tracking()
         topic = request.get("topic", "").strip()
         if not topic:
@@ -1345,6 +1507,7 @@ async def generate_video_lecture(request: dict):
             slide["duration_estimate"] = n.get("duration_estimate", 5)
 
         presentation["cost"] = summarize_cost()
+        presentation["processing_time"] = _get_processing_time()
         return presentation
 
     except HTTPException:
@@ -1369,6 +1532,7 @@ async def generate_video_lecture_stream(request: dict):
 
     async def event_stream():
         try:
+            _start_timing()
             start_tracking()
             slide_agent = _get_slide_agent()
             narration_agent = _get_narration_agent()
@@ -1399,8 +1563,11 @@ async def generate_video_lecture_stream(request: dict):
 
                 yield f"data: {json.dumps({'type': 'slide', 'data': slide})}\n\n"
 
-            yield f"data: {json.dumps({'type': 'cost', 'data': summarize_cost()})}\n\n"
-            yield f"data: {json.dumps({'type': 'complete', 'data': 'done'})}\n\n"
+            presentation["processing_time"] = _get_processing_time()
+            presentation["cost"] = summarize_cost()
+            
+            yield f"data: {json.dumps({'type': 'cost', 'data': presentation['cost']})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'data': presentation})}\n\n"
 
         except Exception as e:
             logger.error(f"Video lecture streaming error: {str(e)}")
@@ -1424,6 +1591,7 @@ async def narrate_single_slide(request: dict):
     Body: { "text": str }
     """
     try:
+        _start_timing()
         start_tracking()
         text = request.get("text", "").strip()
         if not text:
@@ -1431,6 +1599,7 @@ async def narrate_single_slide(request: dict):
 
         narration_agent = _get_narration_agent()
         result = await narration_agent.generate_slide_audio(text)
+        result["processing_time"] = _get_processing_time()
         return _attach_cost(result)
 
     except HTTPException:
@@ -1449,6 +1618,7 @@ async def doubt_solver(file: UploadFile = File(...), question: str = Form("")):
     The AI OCRs it and explains / solves / generates practice from it.
     """
     try:
+        _start_timing()
         start_tracking()
         logger.info(f"Doubt solver upload: {file.filename}")
         content = await file.read()
@@ -1500,6 +1670,7 @@ Teaching rules:
             "preview_url": "",
             "ocr_text": ocr_description,
             "solution": result.content,
+            "processing_time": _get_processing_time()
         })
 
     except HTTPException:
@@ -1509,7 +1680,7 @@ Teaching rules:
         if _is_credit_or_payment_error(str(e)):
             raise HTTPException(
                 status_code=402,
-                detail="Insufficient OpenRouter credits for this request. Please reduce response length or top up credits."
+                detail="Insufficient Mistral API credits/quota for this request. Please reduce response length or increase your Mistral quota."
             )
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1522,9 +1693,12 @@ async def doubt_solver_chat(request: dict):
     Body: { "message": str, "conversation_history": [{"role":str,"content":str}], "image_base64"?: str, "image_type"?: str }
     """
     try:
+        _start_timing()
         start_tracking()
         message = request.get("message", "").strip()
         history = request.get("conversation_history", [])
+        session_id = str(request.get("session_id", "") or "")
+        user_id = str(request.get("user_id", "") or "")
         image_b64 = request.get("image_base64", "")
         image_type = request.get("image_type", "image/png")
 
@@ -1559,9 +1733,16 @@ Teaching rules:
 - Keep responses focused but thorough — cover what needs covering, nothing more.
 """)
 
+        effective_history = _resolve_effective_history(
+            mode="doubt-solver",
+            incoming_history=history,
+            session_id=session_id,
+            user_id=user_id,
+        )
+
         # Build messages from history
         chat_messages = [system]
-        for msg in history[-20:]:  # Keep last 20 messages for context
+        for msg in effective_history[-20:]:  # Keep last 20 messages for context
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "assistant":
@@ -1581,9 +1762,19 @@ Teaching rules:
 
         result = await _invoke_doubt_solver_llm(chat_messages)
 
+        _append_session_turn(
+            mode="doubt-solver",
+            session_id=session_id,
+            user_id=user_id,
+            user_text=("\n\n".join(user_msg_parts) if user_msg_parts else message),
+            assistant_text=result.content,
+            base_history=effective_history,
+        )
+
         return _attach_cost({
             "response": result.content,
             "image_context": image_context if image_context else None,
+            "processing_time": _get_processing_time()
         })
 
     except HTTPException:
@@ -1593,7 +1784,7 @@ Teaching rules:
         if _is_credit_or_payment_error(str(e)):
             raise HTTPException(
                 status_code=402,
-                detail="Insufficient OpenRouter credits for this request. Please reduce response length or top up credits."
+                detail="Insufficient Mistral API credits/quota for this request. Please reduce response length or increase your Mistral quota."
             )
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1607,11 +1798,14 @@ async def guide_chat(request: dict):
     Body: { "message": str, "mode": str, "context": str, "conversation_history": [{"role":str,"content":str}] }
     """
     try:
+        _start_timing()
         start_tracking()
         message = request.get("message", "").strip()
         mode = request.get("mode", "general")
         context = request.get("context", "")
         history = request.get("conversation_history", [])
+        session_id = str(request.get("session_id", "") or "")
+        user_id = str(request.get("user_id", "") or "")
 
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
@@ -1662,10 +1856,17 @@ Rules:
 - Reference previous conversation when relevant
 """
 
+        effective_history = _resolve_effective_history(
+            mode=f"guide:{mode}",
+            incoming_history=history,
+            session_id=session_id,
+            user_id=user_id,
+        )
+
         system = SystemMessage(content=system_prompt)
 
         chat_messages = [system]
-        for msg in history[-15:]:
+        for msg in effective_history[-15:]:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "assistant":
@@ -1677,7 +1878,16 @@ Rules:
 
         result = await llm.ainvoke(chat_messages)
 
-        return _attach_cost({"response": result.content})
+        _append_session_turn(
+            mode=f"guide:{mode}",
+            session_id=session_id,
+            user_id=user_id,
+            user_text=message,
+            assistant_text=result.content,
+            base_history=effective_history,
+        )
+
+        return _attach_cost({"response": result.content, "processing_time": _get_processing_time()})
 
     except HTTPException:
         raise

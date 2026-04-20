@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { Message } from '@/lib/types'
-import { User, Sparkles, Loader2, ExternalLink, Image as ImageIcon, ZoomIn, ZoomOut, X, Maximize2, Volume2, VolumeX, FileText, ArrowRight } from 'lucide-react'
+import { User, Sparkles, Loader2, ExternalLink, Image as ImageIcon, ZoomIn, ZoomOut, X, Maximize2, Volume2, VolumeX, FileText } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { textToSpeech } from '@/lib/api'
@@ -418,26 +418,7 @@ export default function MessageBubble({ message, onFollowUpClick, isLast }: Mess
             </div>
           )}
 
-          {/* Follow-up Suggestions */}
-          {isLast && message.complete && message.followUpSuggestions && message.followUpSuggestions.length > 0 && onFollowUpClick && (
-            <div className="space-y-2 mt-2 animate-fadeIn">
-              <p className="text-xs text-muted-foreground/60 font-medium uppercase tracking-wider">Continue exploring</p>
-              <div className="flex flex-wrap gap-2">
-                {message.followUpSuggestions.slice(0, 4).map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => onFollowUpClick(suggestion)}
-                    className="group flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-card/50 border border-border/30 hover:border-[hsl(73,31%,45%)]/40 hover:bg-[hsl(73,31%,45%)]/5 text-xs text-muted-foreground hover:text-foreground transition-all duration-200 hover:-translate-y-0.5"
-                  >
-                    <span className="line-clamp-1">{suggestion}</span>
-                    <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-[hsl(73,31%,45%)]" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
-        
       </div>
     </div>
 

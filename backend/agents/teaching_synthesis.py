@@ -4,7 +4,7 @@ Teaching Synthesis Agent - Creates comprehensive, pedagogically sound explanatio
 import asyncio
 import re
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from loguru import logger
@@ -18,7 +18,8 @@ from shared.prompts.templates import (
     TEACHING_SYNTHESIS_PROMPT,
     TEACHING_SYNTHESIS_BEGINNER,
     TEACHING_SYNTHESIS_INTERMEDIATE,
-    TEACHING_SYNTHESIS_ADVANCED
+    TEACHING_SYNTHESIS_ADVANCED,
+    COMPARATIVE_EXTRACTION_PROMPT,
 )
 
 
@@ -34,7 +35,7 @@ class TeachingSynthesisAgent:
             logger.info("Teaching Synthesis: Using Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
-                temperature=0.4,
+                temperature=0.2,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
                 max_tokens=3000
@@ -79,6 +80,7 @@ class TeachingSynthesisAgent:
         extracted_content: List[str],
         images: List[ImageData],
         sources: List[Source],
+        conversation_memory: str = "",
         pecar_output: dict = None,
     ) -> TeachingResponse:
         """
@@ -120,6 +122,12 @@ class TeachingSynthesisAgent:
 
             # Always run final synthesis for consistent output format; inject PeCAR as guidance.
             research_content = self._format_research(extracted_content, sources)
+            if conversation_memory:
+                research_content = (
+                    "[Conversation memory - use this to resolve follow-up references]\n"
+                    f"{conversation_memory}\n\n"
+                    f"{research_content}"
+                )
             if pecar_final:
                 research_content += self._format_pecar_guidance(pecar_final)
 
@@ -160,27 +168,12 @@ class TeachingSynthesisAgent:
                 )
                 content = response.content
             except asyncio.TimeoutError:
-                logger.warning("Teaching synthesis timed out; retrying once with compact structured prompt")
-                retry_prompt = prompt_text + (
-                    "\n\nIMPORTANT: Keep the same section format exactly "
-                    "(TL;DR, Step-by-Step Explanation, Visual Explanation, Real-World Analogy, Practice Questions), "
-                    "but be concise and complete."
+                logger.info("Teaching synthesis timed out; using deterministic fallback content")
+                content = self._build_timeout_fallback_content(
+                    question=question,
+                    intent=intent,
+                    extracted_content=extracted_content,
                 )
-                retry_messages = [HumanMessage(content=retry_prompt)]
-                retry_timeout = max(8, synthesis_timeout // 2)
-                try:
-                    retry_response = await asyncio.wait_for(
-                        self._call_llm_with_fallback(retry_messages),
-                        timeout=retry_timeout,
-                    )
-                    content = retry_response.content
-                except asyncio.TimeoutError:
-                    logger.warning("Teaching synthesis retry timed out; using deterministic fallback content")
-                    content = self._build_timeout_fallback_content(
-                        question=question,
-                        intent=intent,
-                        extracted_content=extracted_content,
-                    )
             
             logger.info(f"LLM response length: {len(content)} chars")
             logger.info(f"LLM response preview: {content[:300]}...")
@@ -294,6 +287,18 @@ class TeachingSynthesisAgent:
         return has_live_signal and has_score_signal
 
     @staticmethod
+    def _is_comparison_question(question: str) -> bool:
+        """Detect if this is a comparison/contrast question."""
+        q = (question or "").strip().lower()
+        comparison_keywords = [
+            "compare", "versus", "vs", "contrast", "difference", 
+            "trade-off", "tradeoff", "pros and cons", "advantage",
+            "better", "worse", "similar", "distinguish", "versus",
+            "which is", "what's the difference", "how do they differ"
+        ]
+        return any(keyword in q for keyword in comparison_keywords)
+
+    @staticmethod
     def _extract_live_score_indicators(text: str) -> List[str]:
         """Extract likely live-score snippets from raw fetched content."""
         if not text:
@@ -400,7 +405,10 @@ class TeachingSynthesisAgent:
         """Format research content with source references"""
         formatted = []
         for idx, (content, source) in enumerate(zip(content_list, sources[:len(content_list)])):
-            formatted.append(f"[{idx + 1}] {source.domain}: {content[:1200]}")
+            title = source.title.strip() if source.title else "Untitled source"
+            url = source.url.strip() if source.url else ""
+            snippet = content[:1200].strip()
+            formatted.append(f"[{idx + 1}] {title} ({url})\nDomain: {source.domain}\nEvidence: {snippet}")
         return "\n\n".join(formatted)
 
     def _format_pecar_guidance(self, pecar_final: str) -> str:

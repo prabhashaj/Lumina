@@ -1,0 +1,62 @@
+[
+  {
+    "scenario": "Photosynthesis Foundations",
+    "variant": "Existing Generic Tutor",
+    "semantic": 0.82,
+    "pedagogical": 0.4325,
+    "structural": 0.75,
+    "overall": 0.651,
+    "passed": false,
+    "latency_s": 3.05612320000364
+  },
+  {
+    "scenario": "Photosynthesis Foundations",
+    "variant": "Existing Structured RAG",
+    "semantic": 0.73,
+    "pedagogical": 0.604,
+    "structural": 0.7583,
+    "overall": 0.6853,
+    "passed": false,
+    "latency_s": 57.052339000001666
+  },
+  {
+    "scenario": "Photosynthesis Foundations",
+    "variant": "Lumina + PeCAR",
+    "semantic": 0.8465,
+    "pedagogical": 0.8093,
+    "structural": 0.8917,
+    "overall": 0.8407,
+    "passed": true,
+    "latency_s": 65.20585539999593
+  },
+  {
+    "scenario": "Recursion Versus Iteration",
+    "variant": "Existing Generic Tutor",
+    "semantic": 0.7733,
+    "pedagogical": 0.3812,
+    "structural": 0.825,
+    "overall": 0.6268,
+    "passed": false,
+    "latency_s": 4.702570499997819
+  },
+  {
+    "scenario": "Recursion Versus Iteration",
+    "variant": "Existing Structured RAG",
+    "semantic": 0.8077,
+    "pedagogical": 0.6814,
+    "structural": 0.9333,
+    "overall": 0.7823,
+    "passed": false,
+    "latency_s": 20.17076239999733
+  },
+  {
+    "scenario": "Recursion Versus Iteration",
+    "variant": "Lumina + PeCAR",
+    "semantic": 0.886,
+    "pedagogical": 0.7282,
+    "structural": 0.9333,
+    "overall": 0.8323,
+    "passed": true,
+    "latency_s": 65.53718800000206
+  }
+]

@@ -101,12 +101,12 @@ class IntentAwareStrategySelector:
                 base_techniques.insert(1, PromptTechnique.COT)
             if PromptTechnique.RAG not in base_techniques:
                 base_techniques.insert(0, PromptTechnique.RAG)
-            num_paths = 3
+            num_paths = 2
         elif intent.complexity <= self.LOW_COMPLEXITY_THRESHOLD:
             base_techniques = base_techniques[:2]
             num_paths = 1
         else:
-            num_paths = 2 if mode == LearningMode.DOUBT_SOLVER else 3
+            num_paths = 1 if mode == LearningMode.DOUBT_SOLVER else 2
 
         # --- Learner-level adjustments ---
         if learner.knowledge_level < 0.4:
@@ -128,7 +128,7 @@ class IntentAwareStrategySelector:
         use_retrieval = intent.requires_retrieval or PromptTechnique.RAG in base_techniques
 
         # --- Refinement budget ---
-        max_refinements = 2 if intent.complexity >= self.HIGH_COMPLEXITY_THRESHOLD else 1
+        max_refinements = 1 if intent.complexity >= self.HIGH_COMPLEXITY_THRESHOLD else 0
 
         logger.debug(
             "IASS selected %d techniques for mode=%s, complexity=%.2f, learner=%.2f",

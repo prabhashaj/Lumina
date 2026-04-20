@@ -1,11 +1,57 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+function emitSseEvent(rawEvent: string, onChunk: (chunk: any) => void) {
+  const dataLines = rawEvent
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+
+  if (dataLines.length === 0) return
+
+  const payload = dataLines.join('\n').trim()
+  if (!payload) return
+
+  try {
+    onChunk(JSON.parse(payload))
+  } catch (e) {
+    console.error('Failed to parse SSE payload:', e)
+  }
+}
+
+async function consumeSseStream(reader: ReadableStreamDefaultReader<Uint8Array>, onChunk: (chunk: any) => void): Promise<void> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+
+      for (const event of events) {
+        emitSseEvent(event, onChunk)
+      }
+    }
+
+    const tail = buffer + decoder.decode()
+    if (tail.trim()) {
+      emitSseEvent(tail, onChunk)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export async function streamResearch(
   question: string,
   onChunk: (chunk: any) => void,
   imageContext?: string,
   fileContext?: string,
-  conversationHistory?: { role: string; content: string }[]
+  conversationHistory?: { role: string; content: string }[],
+  sessionId?: string
 ): Promise<void> {
   const body: any = { question }
   if (imageContext) body.image_context = imageContext
@@ -13,6 +59,7 @@ export async function streamResearch(
   if (conversationHistory && conversationHistory.length > 0) {
     body.conversation_history = conversationHistory
   }
+  if (sessionId) body.session_id = sessionId
 
   const response = await fetch(`${API_URL}/api/research/stream`, {
     method: 'POST',
@@ -27,45 +74,29 @@ export async function streamResearch(
   }
 
   const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
 
   if (!reader) {
     throw new Error('No reader available')
   }
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      
-      if (done) break
-
-      const chunk = decoder.decode(value)
-      const lines = chunk.split('\n')
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6)
-          try {
-            const parsed = JSON.parse(data)
-            onChunk(parsed)
-          } catch (e) {
-            console.error('Failed to parse chunk:', e)
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  await consumeSseStream(reader, onChunk)
 }
 
-export async function askQuestion(question: string): Promise<any> {
+export async function askQuestion(
+  question: string,
+  conversationHistory?: { role: string; content: string }[]
+): Promise<any> {
+  const body: any = { question }
+  if (conversationHistory && conversationHistory.length > 0) {
+    body.conversation_history = conversationHistory
+  }
+
   const response = await fetch(`${API_URL}/api/research`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
@@ -175,32 +206,10 @@ export async function streamTopicContent(
   }
 
   const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
 
   if (!reader) throw new Error('No reader available')
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value)
-      const lines = chunk.split('\n')
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const parsed = JSON.parse(line.slice(6))
-            onChunk(parsed)
-          } catch (e) {
-            console.error('Failed to parse chunk:', e)
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  await consumeSseStream(reader, onChunk)
 }
 
 export async function generateQuiz(
@@ -289,32 +298,10 @@ export async function streamPersonalizedContent(
   }
 
   const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
 
   if (!reader) throw new Error('No reader available')
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value)
-      const lines = chunk.split('\n')
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const parsed = JSON.parse(line.slice(6))
-            onChunk(parsed)
-          } catch (e) {
-            console.error('Failed to parse chunk:', e)
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  await consumeSseStream(reader, onChunk)
 }
 
 // ── Video Lecture / Slide Generation API ──────────────────────────────
@@ -354,32 +341,10 @@ export async function streamVideoLecture(
   }
 
   const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
 
   if (!reader) throw new Error('No reader available')
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value)
-      const lines = chunk.split('\n')
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const parsed = JSON.parse(line.slice(6))
-            onChunk(parsed)
-          } catch (e) {
-            console.error('Failed to parse chunk:', e)
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  await consumeSseStream(reader, onChunk)
 }
 
 export async function narrateSingleSlide(text: string): Promise<{
@@ -431,7 +396,8 @@ export async function doubtSolverChat(
   message: string,
   conversationHistory: { role: string; content: string }[],
   imageBase64?: string,
-  imageType?: string
+  imageType?: string,
+  sessionId?: string
 ): Promise<{ response: string; image_context?: string | null }> {
   const body: any = {
     message,
@@ -440,6 +406,9 @@ export async function doubtSolverChat(
   if (imageBase64) {
     body.image_base64 = imageBase64
     body.image_type = imageType || 'image/png'
+  }
+  if (sessionId) {
+    body.session_id = sessionId
   }
 
   const response = await fetch(`${API_URL}/api/doubt-solver/chat`, {
@@ -461,17 +430,23 @@ export async function guideChat(
   message: string,
   mode: string,
   context: string,
-  conversationHistory: { role: string; content: string }[]
+  conversationHistory: { role: string; content: string }[],
+  sessionId?: string
 ): Promise<{ response: string }> {
+  const body: any = {
+    message,
+    mode,
+    context,
+    conversation_history: conversationHistory,
+  }
+  if (sessionId) {
+    body.session_id = sessionId
+  }
+
   const response = await fetch(`${API_URL}/api/guide/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      mode,
-      context,
-      conversation_history: conversationHistory,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {

@@ -132,7 +132,12 @@ class StructuralEvaluator:
         for src in sources[:5]:
             if not isinstance(src, dict):
                 try:
-                    src = src.dict()
+                    if hasattr(src, "model_dump"):
+                        src = src.model_dump()
+                    elif hasattr(src, "dict"):
+                        src = src.dict()
+                    else:
+                        src = {}
                 except Exception:
                     src = {}
             src_score = sum(

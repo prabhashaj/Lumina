@@ -257,30 +257,12 @@ class SlideGeneratorAgent:
     """Generates structured presentation slides with narration scripts"""
 
     def __init__(self):
-        # Use OpenRouter Mistral Small (primary), then Mistral API Medium (backup)
+        # Use Mistral API only.
         self.llm = None
         self.backup_llm = None
-        
-        if settings.openrouter_api_key:
-            logger.info("Slide Generator: Using Mistral Small via OpenRouter")
-            self.llm = ChatOpenAI(
-                model=settings.openrouter_model,
-                temperature=0.7,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                max_tokens=6000  # Slides with narration
-            )
-            # Set backup to Mistral API if available
-            if settings.mistral_api_key:
-                self.backup_llm = ChatOpenAI(
-                    model=settings.mistral_model,
-                    temperature=0.7,
-                    api_key=settings.mistral_api_key,
-                    base_url="https://api.mistral.ai/v1",
-                    max_tokens=6000
-                )
-        elif settings.mistral_api_key:
-            logger.info("Slide Generator: Using Mistral Medium via Mistral API")
+
+        if settings.mistral_api_key:
+            logger.info("Slide Generator: Using Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
                 temperature=0.7,
@@ -290,7 +272,7 @@ class SlideGeneratorAgent:
             )
         
         if not self.llm:
-            raise ValueError("No valid API key found. Please set OPENROUTER_API_KEY or MISTRAL_API_KEY")
+            raise ValueError("No valid API key found. Please set MISTRAL_API_KEY")
 
     async def _call_llm_with_fallback(self, messages):
         """Call LLM with automatic fallback to backup on errors"""
