@@ -114,7 +114,7 @@ export default function GuideChatbot({ mode, context, title, sessionId }: GuideC
         .filter((m) => m.id !== 'greeting' || m.role === 'assistant')
         .map((m) => ({ role: m.role, content: m.content }))
 
-      const result = await guideChat(userMessage.content, mode, context, history, sessionId || undefined)
+      const result = await guideChat(userMessage.content, mode, context, history)
 
       setMessages((prev) =>
         prev.map((m) =>

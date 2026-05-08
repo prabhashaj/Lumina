@@ -260,8 +260,7 @@ export default function ChatInterface({ messages, setMessages, onMessagesChange,
         },
         imageContext || undefined,
         fileContext || undefined,
-        conversationHistory.length > 0 ? conversationHistory : undefined,
-        sessionId || undefined
+        conversationHistory.length > 0 ? conversationHistory : undefined
       )
     } catch (error) {
       console.error('Research error:', error)
