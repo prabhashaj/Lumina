@@ -53,19 +53,6 @@ class PedagogicalEvaluator:
     def __init__(self):
         self.llm = _build_evaluator_llm()
 
-    async def aclose(self) -> None:
-        """Best-effort cleanup for underlying async HTTP clients."""
-        llm = self.llm
-        if llm is None:
-            return
-
-        async_client = getattr(llm, "async_client", None)
-        if async_client is not None:
-            try:
-                await async_client.aclose()
-            except Exception:
-                pass
-
     async def evaluate_teaching_quality(
         self,
         question: str,
@@ -115,18 +102,25 @@ class PedagogicalEvaluator:
             return 0.2
         if self.llm is None:
             return self._heuristic_analogy(analogy)
-        prompt = f"""Rate this analogy for teaching "{topic[:60]}" on 0-1 scale.
+        prompt = f"""Evaluate the quality of this analogy for teaching "{topic}":
 
-Analogy: {analogy[:300]}
+Analogy: {analogy}
 
-Good analogy = familiar concept maps clearly to topic + captures essence + memorable.
-Bad analogy = confusing, misleading, or doesn't clarify.
+A good analogy:
+1. Maps a familiar concept to the unfamiliar topic
+2. Highlights essential similarities
+3. Avoids confusing differences
+4. Is easy to visualise
+5. Builds a clear mental model
 
-{{"score": 0.85}}"""
+Rate 0.0-1.0.
+
+Respond with ONLY valid JSON (no markdown):
+{{"analogy_score": 0.8, "strengths": [], "weaknesses": [], "reasoning": "..."}}"""
         data = await self._call(prompt)
-        if not data or "score" not in data:
+        if not data or "analogy_score" not in data:
             return self._heuristic_analogy(analogy)
-        return float(data.get("score", 0.5))
+        return float(data.get("analogy_score", 0.5))
 
     async def _evaluate_examples(self, topic: str, examples: List[str]) -> float:
         if not examples:

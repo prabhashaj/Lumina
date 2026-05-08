@@ -5,9 +5,6 @@
 
 @layer base {
   :root {
-    --font-sans: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
-    --font-caveat: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
-    --font-patrick: "Comic Sans MS", "Segoe Print", cursive;
     --background: 0 0% 100%;
     --foreground: 0 0% 18%;
     --card: 0 0% 98%;
@@ -62,7 +59,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-sans);
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

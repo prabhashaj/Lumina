@@ -17,11 +17,6 @@ build/
 logs/
 *.log
 
-# Generated reports and documents
-backend/reports/
-docs/generated/
-*.docx
-
 # Environment
 .env
 .env.local
@@ -46,8 +41,6 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
-backend/test_output.txt
-backend/test_run_output*.txt
 
 # Next.js
 .next/

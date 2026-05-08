@@ -53,19 +53,6 @@ class SemanticEvaluator:
     def __init__(self):
         self.llm = _build_evaluator_llm()
 
-    async def aclose(self) -> None:
-        """Best-effort cleanup for underlying async HTTP clients."""
-        llm = self.llm
-        if llm is None:
-            return
-
-        async_client = getattr(llm, "async_client", None)
-        if async_client is not None:
-            try:
-                await async_client.aclose()
-            except Exception:
-                pass
-
     async def evaluate_teaching_response(
         self,
         question: str,

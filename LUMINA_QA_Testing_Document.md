@@ -273,86 +273,16 @@ Use this format for daily or release-level QA reporting.
 | Metric | Value |
 |---|---|
 | Total Test Cases Planned | 60 |
-| Total Executed | 60 documented |
-| Passed | 49 |
-| Failed | 0 |
-| Skipped | 11 |
-| Blocked | 0 |
-| Pass Percentage | 81.7% |
-
-Execution Date: 2026-04-13  
-Environment: Local Windows, backend via `.venv312`, FastAPI TestClient integration run
-
-Note: Automated subset run: 50 executed, 49 passed, 1 skipped.
+| Total Executed | |
+| Passed | |
+| Failed | |
+| Skipped | |
+| Blocked | |
+| Pass Percentage | |
 
 Pass Percentage formula:
 
 `(Passed / Executed) * 100`
-
-### 5.4 TC01-TC60 Execution Matrix (Latest Run)
-
-| Test Case ID | Actual Result | Status |
-|---|---|---|
-| TC01 | `GET /` returned 200 with `status`, `service`, `version`, `cost`, `processing_time`. | PASS |
-| TC02 | `GET /health` returned 200 with orchestrator and settings fields. | PASS |
-| TC03 | `GET /api/config` returned 200 with config payload and `processing_time`. | PASS |
-| TC04 | CORS preflight (`OPTIONS /api/research`) accepted with allow headers. | PASS |
-| TC05 | Invalid method `PUT /health` returned 405 as expected. | PASS |
-| TC06 | Not executed; requires orchestrator-unavailable mocking path. | SKIP |
-| TC07 | Valid research request returned a full response schema with teaching content. | PASS |
-| TC08 | Short question validation rejected request (400/422 accepted). | PASS |
-| TC09 | Over-length question validation rejected request (400/422 accepted). | PASS |
-| TC10 | Research accepted attachment context fields and completed request path. | PASS |
-| TC11 | Research stream emitted status and complete events in order. | PASS |
-| TC12 | Research stream emitted source citation events. | PASS |
-| TC13 | Not executed; induced provider/network failure path not run in this cycle. | SKIP |
-| TC14 | Research endpoint accepted conversation history without error. | PASS |
-| TC15 | Research response returned a valid difficulty level enum. | PASS |
-| TC16 | Research response returned a practice_questions list. | PASS |
-| TC17 | Research response processing_time was positive. | PASS |
-| TC18 | Research stream completed with exactly one terminal event. | PASS |
-| TC19 | Supported PNG image upload returned 200 with a preview_url. | PASS |
-| TC20 | Unsupported image MIME rejected with 400. | PASS |
-| TC21 | TXT upload returned extracted_text successfully. | PASS |
-| TC22 | DOCX upload returned extracted_text successfully. | PASS |
-| TC23 | Unsupported file type rejected with 400. | PASS |
-| TC24 | Large text upload returned a capped extraction with char_count. | PASS |
-| TC25 | TTS request with text returned a successful response. | PASS |
-| TC26 | TTS request returned a 200 response with audio or browser fallback. | PASS |
-| TC27 | Exam roadmap generation returned a subject and chapter list. | PASS |
-| TC28 | Missing subject in roadmap request rejected with 400. | PASS |
-| TC29 | Not executed; exam roadmap 503 service-unavailable path not run in this cycle. | SKIP |
-| TC30 | Topic-content stream completed successfully with complete event. | PASS |
-| TC31 | Missing topic in topic-content stream rejected with 400. | PASS |
-| TC32 | Quiz generation returned a questions list successfully. | PASS |
-| TC33 | Missing topic in quiz request rejected with 400. | PASS |
-| TC34 | Not executed; quiz per-question ID contract not run in this cycle. | SKIP |
-| TC35 | Not executed; malformed quiz LLM-output resilience case not run in this cycle. | SKIP |
-| TC36 | Personalized assessment returned a questions list successfully. | PASS |
-| TC37 | Missing topic in assessment request rejected with 400. | PASS |
-| TC38 | Profile analysis returned knowledgeLevel and overallScore. | PASS |
-| TC39 | Missing fields in profile analysis rejected with 400. | PASS |
-| TC40 | Not executed; explicit level-classification logic matrix not run in this cycle. | SKIP |
-| TC41 | Personalized learning stream completed successfully with complete event. | PASS |
-| TC42 | Missing topic in personalized stream rejected with 400. | PASS |
-| TC43 | Not executed; personalized SSE cost-event contract not run in this cycle. | SKIP |
-| TC44 | Not executed; short answer-array boundary case not run in this cycle. | SKIP |
-| TC45 | Video lecture generation returned a slide deck successfully. | PASS |
-| TC46 | Missing topic in video generation request rejected with 400. | PASS |
-| TC47 | Video lecture stream completed successfully with complete event. | PASS |
-| TC48 | Missing topic in video stream request rejected with 400. | PASS |
-| TC49 | Not executed; narrate-slide positive path not run in this cycle. | SKIP |
-| TC50 | Missing text in narrate-slide request rejected with 400. | PASS |
-| TC51 | Not executed; slide count parameter behavior case not run in this cycle. | SKIP |
-| TC52 | Not executed; image-resolution fallback robustness case not run in this cycle. | SKIP |
-| TC53 | Doubt solver image upload returned a solution successfully. | PASS |
-| TC54 | Unsupported doubt-solver upload rejected with 400. | PASS |
-| TC55 | Doubt solver text chat returned a response successfully. | PASS |
-| TC56 | Doubt solver chat with image context returned a response successfully. | PASS |
-| TC57 | Empty doubt-solver chat payload rejected with 400. | PASS |
-| TC58 | Doubt solver payment/quota mapping path is reachable. | PASS |
-| TC59 | Guide chatbot returned a mode-aware response successfully. | PASS |
-| TC60 | Code tutor returned a coding-context response successfully. | PASS |
 
 ### 5.2 Defect Log Template
 

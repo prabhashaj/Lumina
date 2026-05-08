@@ -82,7 +82,7 @@ export function groupSessionsByDate<T extends { updatedAt: string }>(sessions: T
   const last7 = new Date(today.getTime() - 7 * 86400000)
   const last30 = new Date(today.getTime() - 30 * 86400000)
 
-  const groups: Record<string, T[]> = {
+  const groups: Record<string, ChatSession[]> = {
     Today: [],
     Yesterday: [],
     'Previous 7 Days': [],

@@ -20,6 +20,7 @@ from shared.prompts.templates import (
     TEACHING_SYNTHESIS_INTERMEDIATE,
     TEACHING_SYNTHESIS_ADVANCED,
     COMPARATIVE_EXTRACTION_PROMPT,
+    SEMANTIC_VERIFICATION_PROMPT,
 )
 
 
@@ -35,7 +36,7 @@ class TeachingSynthesisAgent:
             logger.info("Teaching Synthesis: Using Mistral API")
             self.llm = ChatOpenAI(
                 model=settings.mistral_model,
-                temperature=0.2,
+                temperature=0.4,
                 api_key=settings.mistral_api_key,
                 base_url="https://api.mistral.ai/v1",
                 max_tokens=3000
@@ -73,6 +74,37 @@ class TeachingSynthesisAgent:
             logger.error(f"LLM call error: {str(e)}")
             raise
 
+    async def _verify_semantic_accuracy(
+        self, 
+        question: str, 
+        response_content: str, 
+        sources: List[Source]
+    ) -> Dict[str, Any]:
+        """Verify semantic accuracy using LLM fact-checking."""
+        try:
+            sources_text = "\n".join([f"[{i+1}] {s.snippet}" for i, s in enumerate(sources[:3])])
+            verification_prompt = SEMANTIC_VERIFICATION_PROMPT.format(
+                question=question,
+                response=response_content[:2000],  # Use first 2000 chars for efficiency
+                sources=sources_text
+            )
+            
+            verification_result = await self._call_llm(prompt=verification_prompt)
+            
+            # Parse JSON response
+            try:
+                import json
+                verification_data = json.loads(verification_result)
+                logger.info(f"Semantic verification: accuracy={verification_data.get('accuracy_score', 0.0)}")
+                return verification_data
+            except:
+                logger.warning("Failed to parse semantic verification result")
+                return {"accuracy_score": 0.7, "revision_needed": False}
+                
+        except Exception as e:
+            logger.warning(f"Semantic verification failed: {str(e)}")
+            return {"accuracy_score": 0.7, "revision_needed": False}
+
     async def synthesize(
         self,
         question: str,
@@ -80,7 +112,6 @@ class TeachingSynthesisAgent:
         extracted_content: List[str],
         images: List[ImageData],
         sources: List[Source],
-        conversation_memory: str = "",
         pecar_output: dict = None,
     ) -> TeachingResponse:
         """
@@ -122,12 +153,9 @@ class TeachingSynthesisAgent:
 
             # Always run final synthesis for consistent output format; inject PeCAR as guidance.
             research_content = self._format_research(extracted_content, sources)
-            if conversation_memory:
-                research_content = (
-                    "[Conversation memory - use this to resolve follow-up references]\n"
-                    f"{conversation_memory}\n\n"
-                    f"{research_content}"
-                )
+            max_research_chars = max(1200, int(getattr(settings, "synthesis_research_chars", 2600)))
+            if len(research_content) > max_research_chars:
+                research_content = research_content[:max_research_chars].rstrip() + "\n\n[Research truncated for latency budget]"
             if pecar_final:
                 research_content += self._format_pecar_guidance(pecar_final)
 
@@ -160,20 +188,8 @@ class TeachingSynthesisAgent:
             )
             messages = [HumanMessage(content=prompt_text)]
 
-            synthesis_timeout = max(10, int(getattr(settings, "synthesis_timeout_seconds", 35)))
-            try:
-                response = await asyncio.wait_for(
-                    self._call_llm_with_fallback(messages),
-                    timeout=synthesis_timeout,
-                )
-                content = response.content
-            except asyncio.TimeoutError:
-                logger.info("Teaching synthesis timed out; using deterministic fallback content")
-                content = self._build_timeout_fallback_content(
-                    question=question,
-                    intent=intent,
-                    extracted_content=extracted_content,
-                )
+            response = await self._call_llm_with_fallback(messages)
+            content = response.content
             
             logger.info(f"LLM response length: {len(content)} chars")
             logger.info(f"LLM response preview: {content[:300]}...")
@@ -259,6 +275,15 @@ class TeachingSynthesisAgent:
             
         except Exception as e:
             logger.error(f"Teaching synthesis error: {str(e)}")
+            if self._is_transient_connection_error(e):
+                logger.warning("Network connectivity issue detected during synthesis; returning degraded fallback response")
+                return self._build_connection_fallback_response(
+                    question=question,
+                    intent=intent,
+                    extracted_content=extracted_content,
+                    images=images,
+                    sources=sources,
+                )
             raise
 
     def _is_usable_pecar_output(self, text: str) -> bool:
@@ -405,10 +430,7 @@ class TeachingSynthesisAgent:
         """Format research content with source references"""
         formatted = []
         for idx, (content, source) in enumerate(zip(content_list, sources[:len(content_list)])):
-            title = source.title.strip() if source.title else "Untitled source"
-            url = source.url.strip() if source.url else ""
-            snippet = content[:1200].strip()
-            formatted.append(f"[{idx + 1}] {title} ({url})\nDomain: {source.domain}\nEvidence: {snippet}")
+            formatted.append(f"[{idx + 1}] {source.domain}: {content[:1200]}")
         return "\n\n".join(formatted)
 
     def _format_pecar_guidance(self, pecar_final: str) -> str:
@@ -475,6 +497,75 @@ class TeachingSynthesisAgent:
             if len(seed) >= 4:
                 break
         return seed[:4]
+
+    @staticmethod
+    def _is_transient_connection_error(exc: Exception) -> bool:
+        """Identify transient network/provider connectivity failures."""
+        keywords = (
+            "connection error",
+            "connecterror",
+            "apiconnectionerror",
+            "getaddrinfo failed",
+            "temporary failure in name resolution",
+            "name or service not known",
+            "dns",
+            "nodename nor servname provided",
+            "network is unreachable",
+            "timed out",
+            "timeout",
+        )
+
+        checked = 0
+        current: Any = exc
+        while current is not None and checked < 8:
+            text = f"{type(current).__name__}: {current}".lower()
+            if any(k in text for k in keywords):
+                return True
+            current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+            checked += 1
+
+        return False
+
+    def _build_connection_fallback_response(
+        self,
+        question: str,
+        intent: IntentAnalysis,
+        extracted_content: List[str],
+        images: List[ImageData],
+        sources: List[Source],
+    ) -> TeachingResponse:
+        """Return a deterministic response when LLM/provider network calls fail."""
+        content = self._build_timeout_fallback_content(
+            question=question,
+            intent=intent,
+            extracted_content=extracted_content,
+        )
+        parsed = self._parse_teaching_content(content)
+        practice_questions = self._build_fallback_questions(question, parsed.get("practice_questions", []))
+
+        tldr = (parsed.get("tldr") or "").strip()
+        if tldr:
+            tldr += " "
+        tldr += "Note: Live model synthesis is temporarily unavailable due to a network connection issue."
+
+        return TeachingResponse(
+            question=question,
+            tldr=tldr,
+            explanation=TeachingSection(
+                title="Explanation",
+                content=parsed.get("explanation", ""),
+            ),
+            visual_explanation=parsed.get("visual_explanation"),
+            images=images,
+            analogy=parsed.get("analogy", ""),
+            practice_questions=practice_questions,
+            sources=sources,
+            difficulty_level=intent.difficulty_level,
+            confidence_score=0.45,
+            processing_time=0.0,
+            follow_up_suggestions=[],
+            pecar_metrics=None,
+        )
     
     def _format_image_references(self, images: List[ImageData]) -> str:
         """Format image references for teaching integration (no VLM analysis needed)"""

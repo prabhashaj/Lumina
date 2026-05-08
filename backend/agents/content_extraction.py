@@ -10,7 +10,7 @@ import requests
 from loguru import logger
 
 from config.settings import settings
-from shared.prompts.templates import CONTENT_EXTRACTION_PROMPT, COMPARATIVE_EXTRACTION_PROMPT
+from shared.prompts.templates import CONTENT_EXTRACTION_PROMPT
 from shared.schemas.models import SearchResult
 
 
@@ -47,23 +47,11 @@ class ContentExtractionAgent:
                 return await self.backup_llm.ainvoke(messages)
             raise
         
-    @staticmethod
-    def _is_comparison_query(topic: str) -> bool:
-        """Detect if topic is a comparison/contrast query."""
-        q = (topic or "").strip().lower()
-        comparison_keywords = [
-            "compare", "versus", "vs", "contrast", "difference", 
-            "trade-off", "tradeoff", "pros and cons", "advantage",
-            "better", "worse", "similar", "distinguish",
-            "which is", "what's the difference", "how do they differ"
-        ]
-        return any(keyword in q for keyword in comparison_keywords)
-
     async def extract_content(
         self, 
         search_result: SearchResult,
         topic: str
-    ) -> tuple[str, bool]:
+    ) -> str:
         """
         Extract relevant educational content from a search result
         
@@ -80,45 +68,24 @@ class ContentExtractionAgent:
             
             if not content or len(content) < 100:
                 logger.warning(f"Short/missing content from {search_result.url}")
-                return "", False
+                return ""
             
             # Use LLM to extract most relevant parts
-            # Choose prompt based on query type
-            if self._is_comparison_query(topic):
-                logger.info(f"Using comparative extraction for: {topic[:60]}")
-                extraction_prompt = COMPARATIVE_EXTRACTION_PROMPT.format(
-                    topic=topic,
-                    query=topic,
-                    content=content[:4000]
-                )
-            else:
-                extraction_prompt = CONTENT_EXTRACTION_PROMPT.format(
-                    topic=topic,
-                    content=content[:4000]  # Limit to avoid token limits
-                )
-            
-            messages = [HumanMessage(content=extraction_prompt)]
+            prompt_text = CONTENT_EXTRACTION_PROMPT.format(
+                topic=topic,
+                content=content[:4000]  # Limit to avoid token limits
+            )
+            messages = [HumanMessage(content=prompt_text)]
 
-            extraction_timeout = max(
-                10,
-                int(getattr(settings, "content_extraction_timeout_seconds", 30)),
-            )
-            response = await asyncio.wait_for(
-                self._call_llm_with_fallback(messages),
-                timeout=extraction_timeout,
-            )
+            response = await self._call_llm_with_fallback(messages)
             extracted = response.content.strip()
             
             logger.info(f"Extracted {len(extracted)} chars from {search_result.url}")
-            return extracted, True
+            return extracted
 
-        except asyncio.TimeoutError:
-            logger.warning(f"Content extraction timed out for {search_result.url}; using raw snippet fallback")
-            return search_result.content[:1200], False
-            
         except Exception as e:
             logger.error(f"Content extraction error: {str(e)}")
-            return search_result.content, False  # Fallback to original
+            return search_result.content  # Fallback to original
     
     async def process_multiple(
         self,
@@ -142,22 +109,18 @@ class ContentExtractionAgent:
         # Process top results
         top_results = search_results[:max_sources]
         
-        tasks = [self.extract_content(result, topic) for result in top_results]
-
+        tasks = [
+            self.extract_content(result, topic)
+            for result in top_results
+        ]
+        
         extracted_contents = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Filter out errors and empty content while preserving successful order.
-        valid_content = []
-        for content in extracted_contents:
-            if isinstance(content, tuple):
-                text, _used_fallback = content
-            elif isinstance(content, str):
-                text = content
-            else:
-                continue
-
-            if isinstance(text, str) and len(text) > 50:
-                valid_content.append(text)
+        
+        # Filter out errors and empty content
+        valid_content = [
+            content for content in extracted_contents
+            if isinstance(content, str) and len(content) > 50
+        ]
         
         logger.info(f"Processed {len(top_results)} sources → {len(valid_content)} valid extractions")
         return valid_content

@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-import pytest_asyncio
 import asyncio
 from typing import Dict, List, Any
 
@@ -254,13 +253,10 @@ class TestPedagogicalEvaluatorHeuristics:
 class TestSemanticEvaluator:
     """LLM-based semantic quality tests. Require valid API keys."""
 
-    @pytest_asyncio.fixture
-    async def evaluator(self):
+    @pytest.fixture
+    def evaluator(self):
         from evaluation.semantic_evaluator import SemanticEvaluator
-        evaluator = SemanticEvaluator()
-        yield evaluator
-        if hasattr(evaluator, "aclose"):
-            await evaluator.aclose()
+        return SemanticEvaluator()
 
     @pytest.mark.asyncio
     async def test_accurate_response_scores_high(self, evaluator, sample_response):
@@ -296,13 +292,10 @@ class TestSemanticEvaluator:
 class TestPedagogicalEvaluatorLLM:
     """LLM-based pedagogical evaluation. Require valid API keys."""
 
-    @pytest_asyncio.fixture
-    async def evaluator(self):
+    @pytest.fixture
+    def evaluator(self):
         from evaluation.pedagogical_evaluator import PedagogicalEvaluator
-        evaluator = PedagogicalEvaluator()
-        yield evaluator
-        if hasattr(evaluator, "aclose"):
-            await evaluator.aclose()
+        return PedagogicalEvaluator()
 
     @pytest.mark.asyncio
     async def test_full_pedagogical_evaluation(self, evaluator, sample_response):
@@ -341,13 +334,10 @@ class TestPedagogicalEvaluatorLLM:
 class TestEvaluationDashboard:
     """End-to-end dashboard evaluation. Require valid API keys."""
 
-    @pytest_asyncio.fixture
-    async def dashboard(self):
+    @pytest.fixture
+    def dashboard(self):
         from evaluation.evaluation_dashboard import EvaluationDashboard
-        dashboard = EvaluationDashboard()
-        yield dashboard
-        if hasattr(dashboard, "aclose"):
-            await dashboard.aclose()
+        return EvaluationDashboard()
 
     @pytest.mark.asyncio
     async def test_full_pipeline_evaluation(self, dashboard, sample_response):

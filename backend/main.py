@@ -37,15 +37,6 @@ def _safe_json_loads(raw: str) -> dict:
     return json.loads(raw)
 
 
-def _model_to_dict(obj):
-    """Serialize Pydantic v2/v1 models safely without deprecation warnings."""
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    return obj
-
-
 def _attach_cost(payload: dict) -> dict:
     payload["cost"] = summarize_cost()
     return payload
@@ -66,102 +57,6 @@ def _get_processing_time() -> float:
     if _request_start_time is None:
         return 0.0
     return round(_time.time() - _request_start_time, 3)
-
-
-# Session-scoped conversational memory (fallback when client sends partial/no history)
-_SESSION_MEMORY_TTL_SECONDS = 6 * 60 * 60
-_SESSION_MEMORY_MAX_MESSAGES = 40
-_session_memory_store = {}
-
-
-def _session_memory_key(mode: str, session_id: str, user_id: str = "") -> str:
-    safe_mode = (mode or "general").strip().lower()
-    safe_session = (session_id or "").strip()
-    safe_user = (user_id or "").strip()
-    return f"{safe_mode}:{safe_user}:{safe_session}"
-
-
-def _normalize_history_items(history, max_messages: int = 20):
-    cleaned = []
-    if not isinstance(history, list):
-        return cleaned
-
-    for item in history:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role", "user")).strip().lower()
-        if role not in {"user", "assistant", "system"}:
-            role = "user"
-        content = str(item.get("content", "")).strip()
-        if not content:
-            continue
-        cleaned.append({"role": role, "content": content})
-
-    return cleaned[-max_messages:]
-
-
-def _prune_session_memory() -> None:
-    now = _time.time()
-    stale_keys = []
-    for key, entry in _session_memory_store.items():
-        if now - entry.get("updated_at", 0) > _SESSION_MEMORY_TTL_SECONDS:
-            stale_keys.append(key)
-    for key in stale_keys:
-        _session_memory_store.pop(key, None)
-
-
-def _get_session_history(mode: str, session_id: str, user_id: str = ""):
-    if not session_id:
-        return []
-    _prune_session_memory()
-    key = _session_memory_key(mode, session_id, user_id)
-    entry = _session_memory_store.get(key)
-    if not entry:
-        return []
-    return list(entry.get("history", []))
-
-
-def _save_session_history(mode: str, session_id: str, history, user_id: str = "") -> None:
-    if not session_id:
-        return
-    key = _session_memory_key(mode, session_id, user_id)
-    normalized = _normalize_history_items(history, max_messages=_SESSION_MEMORY_MAX_MESSAGES)
-    _session_memory_store[key] = {
-        "history": normalized,
-        "updated_at": _time.time(),
-    }
-
-
-def _resolve_effective_history(mode: str, incoming_history, session_id: str = "", user_id: str = ""):
-    normalized_incoming = _normalize_history_items(incoming_history, max_messages=_SESSION_MEMORY_MAX_MESSAGES)
-    if normalized_incoming:
-        _save_session_history(mode, session_id, normalized_incoming, user_id)
-        return normalized_incoming
-    return _get_session_history(mode, session_id, user_id)
-
-
-def _append_session_turn(
-    mode: str,
-    session_id: str,
-    user_text: str,
-    assistant_text: str,
-    user_id: str = "",
-    base_history=None,
-) -> None:
-    if not session_id:
-        return
-
-    history = _normalize_history_items(base_history or _get_session_history(mode, session_id, user_id), max_messages=_SESSION_MEMORY_MAX_MESSAGES)
-
-    user_msg = (user_text or "").strip()
-    assistant_msg = (assistant_text or "").strip()
-
-    if user_msg:
-        history.append({"role": "user", "content": user_msg})
-    if assistant_msg:
-        history.append({"role": "assistant", "content": assistant_msg})
-
-    _save_session_history(mode, session_id, history, user_id)
 
 
 # Initialize logger
@@ -450,25 +345,8 @@ async def research_question(request: ResearchRequest):
         except Exception as init_error:
             raise HTTPException(status_code=503, detail=f"Service not initialized: {init_error}")
         
-        effective_history = _resolve_effective_history(
-            mode="research",
-            incoming_history=request.conversation_history,
-            session_id=request.session_id or "",
-            user_id=request.user_id or "",
-        )
-        effective_request = request.model_copy(update={"conversation_history": effective_history})
-
         # Process through the orchestrator
-        response = await ready_orchestrator.process_question(effective_request)
-
-        _append_session_turn(
-            mode="research",
-            session_id=request.session_id or "",
-            user_id=request.user_id or "",
-            user_text=request.question,
-            assistant_text=(response.tldr or response.explanation.content[:300]),
-            base_history=effective_history,
-        )
+        response = await ready_orchestrator.process_question(request)
         
         # Add processing time
         response.processing_time = _get_processing_time()
@@ -516,17 +394,10 @@ async def research_question_stream(request: ResearchRequest):
             if request.file_context:
                 enriched_question += f"\n\n[User attached a document with the following content:\n{request.file_context[:5000]}]"
             
-            effective_history = _resolve_effective_history(
-                mode="research",
-                incoming_history=request.conversation_history,
-                session_id=request.session_id or "",
-                user_id=request.user_id or "",
-            )
-
             # Create enriched request
             enriched_request = ResearchRequest(
                 question=enriched_question,
-                conversation_history=effective_history,
+                conversation_history=request.conversation_history,
                 user_id=request.user_id,
                 session_id=request.session_id
             )
@@ -569,15 +440,6 @@ async def research_question_stream(request: ResearchRequest):
 
             response = await workflow_task
 
-            _append_session_turn(
-                mode="research",
-                session_id=request.session_id or "",
-                user_id=request.user_id or "",
-                user_text=request.question,
-                assistant_text=(response.tldr or response.explanation.content[:300]),
-                base_history=effective_history,
-            )
-
             while not progress_queue.empty():
                 stage = (progress_queue.get_nowait() or "").strip()
                 if stage:
@@ -592,15 +454,15 @@ async def research_question_stream(request: ResearchRequest):
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
             
             # Send explanation
-            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
             
             # Send images
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
             
             # Send sources
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
             
             # Send analogy
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
@@ -620,7 +482,7 @@ async def research_question_stream(request: ResearchRequest):
             response.cost = summarize_cost()
 
             # Send complete signal with full response
-            yield f"data: {json.dumps({'type': 'complete', 'data': _model_to_dict(response)})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'data': response.dict()})}\n\n"
             
         except Exception as e:
             logger.error(f"Streaming error: {str(e)}")
@@ -911,20 +773,20 @@ async def generate_topic_content_stream(request: dict):
             yield f"data: {json.dumps({'type': 'status', 'data': 'Synthesizing content...'})}\n\n"
             yield f"data: {json.dumps({'type': 'topic', 'data': topic})}\n\n"
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
-            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
 
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
 
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
 
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
 
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
-            response_dict = _model_to_dict(response)
+            response_dict = response.dict()
             response_dict["processing_time"] = _get_processing_time()
             response_dict["cost"] = summarize_cost()
             
@@ -1344,20 +1206,20 @@ Provide a comprehensive, personalized explanation."""
             yield f"data: {json.dumps({'type': 'status', 'data': 'Tailoring explanation to your learning style...'})}\n\n"
             yield f"data: {json.dumps({'type': 'topic', 'data': topic})}\n\n"
             yield f"data: {json.dumps({'type': 'tldr', 'data': response.tldr})}\n\n"
-            yield f"data: {json.dumps({'type': 'explanation', 'data': _model_to_dict(response.explanation)})}\n\n"
+            yield f"data: {json.dumps({'type': 'explanation', 'data': response.explanation.dict()})}\n\n"
 
             for img in response.images:
-                yield f"data: {json.dumps({'type': 'image', 'data': _model_to_dict(img)})}\n\n"
+                yield f"data: {json.dumps({'type': 'image', 'data': img.dict()})}\n\n"
 
             for source in response.sources:
-                yield f"data: {json.dumps({'type': 'source', 'data': _model_to_dict(source)})}\n\n"
+                yield f"data: {json.dumps({'type': 'source', 'data': source.dict()})}\n\n"
 
             yield f"data: {json.dumps({'type': 'analogy', 'data': response.analogy})}\n\n"
 
             for q in response.practice_questions:
                 yield f"data: {json.dumps({'type': 'practice_question', 'data': q})}\n\n"
 
-            response_dict = _model_to_dict(response)
+            response_dict = response.dict()
             response_dict["processing_time"] = _get_processing_time()
             response_dict["cost"] = summarize_cost()
             
@@ -1697,8 +1559,6 @@ async def doubt_solver_chat(request: dict):
         start_tracking()
         message = request.get("message", "").strip()
         history = request.get("conversation_history", [])
-        session_id = str(request.get("session_id", "") or "")
-        user_id = str(request.get("user_id", "") or "")
         image_b64 = request.get("image_base64", "")
         image_type = request.get("image_type", "image/png")
 
@@ -1733,16 +1593,9 @@ Teaching rules:
 - Keep responses focused but thorough — cover what needs covering, nothing more.
 """)
 
-        effective_history = _resolve_effective_history(
-            mode="doubt-solver",
-            incoming_history=history,
-            session_id=session_id,
-            user_id=user_id,
-        )
-
         # Build messages from history
         chat_messages = [system]
-        for msg in effective_history[-20:]:  # Keep last 20 messages for context
+        for msg in history[-20:]:  # Keep last 20 messages for context
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "assistant":
@@ -1761,15 +1614,6 @@ Teaching rules:
         chat_messages.append(HMsg(content="\n\n".join(user_msg_parts) if user_msg_parts else "Please help me understand this."))
 
         result = await _invoke_doubt_solver_llm(chat_messages)
-
-        _append_session_turn(
-            mode="doubt-solver",
-            session_id=session_id,
-            user_id=user_id,
-            user_text=("\n\n".join(user_msg_parts) if user_msg_parts else message),
-            assistant_text=result.content,
-            base_history=effective_history,
-        )
 
         return _attach_cost({
             "response": result.content,
@@ -1804,8 +1648,6 @@ async def guide_chat(request: dict):
         mode = request.get("mode", "general")
         context = request.get("context", "")
         history = request.get("conversation_history", [])
-        session_id = str(request.get("session_id", "") or "")
-        user_id = str(request.get("user_id", "") or "")
 
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
@@ -1856,17 +1698,10 @@ Rules:
 - Reference previous conversation when relevant
 """
 
-        effective_history = _resolve_effective_history(
-            mode=f"guide:{mode}",
-            incoming_history=history,
-            session_id=session_id,
-            user_id=user_id,
-        )
-
         system = SystemMessage(content=system_prompt)
 
         chat_messages = [system]
-        for msg in effective_history[-15:]:
+        for msg in history[-15:]:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "assistant":
@@ -1877,15 +1712,6 @@ Rules:
         chat_messages.append(HMsg(content=message))
 
         result = await llm.ainvoke(chat_messages)
-
-        _append_session_turn(
-            mode=f"guide:{mode}",
-            session_id=session_id,
-            user_id=user_id,
-            user_text=message,
-            assistant_text=result.content,
-            base_history=effective_history,
-        )
 
         return _attach_cost({"response": result.content, "processing_time": _get_processing_time()})
 

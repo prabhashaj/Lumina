@@ -50,8 +50,7 @@ export async function streamResearch(
   onChunk: (chunk: any) => void,
   imageContext?: string,
   fileContext?: string,
-  conversationHistory?: { role: string; content: string }[],
-  sessionId?: string
+  conversationHistory?: { role: string; content: string }[]
 ): Promise<void> {
   const body: any = { question }
   if (imageContext) body.image_context = imageContext
@@ -59,7 +58,6 @@ export async function streamResearch(
   if (conversationHistory && conversationHistory.length > 0) {
     body.conversation_history = conversationHistory
   }
-  if (sessionId) body.session_id = sessionId
 
   const response = await fetch(`${API_URL}/api/research/stream`, {
     method: 'POST',
@@ -82,21 +80,13 @@ export async function streamResearch(
   await consumeSseStream(reader, onChunk)
 }
 
-export async function askQuestion(
-  question: string,
-  conversationHistory?: { role: string; content: string }[]
-): Promise<any> {
-  const body: any = { question }
-  if (conversationHistory && conversationHistory.length > 0) {
-    body.conversation_history = conversationHistory
-  }
-
+export async function askQuestion(question: string): Promise<any> {
   const response = await fetch(`${API_URL}/api/research`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ question }),
   })
 
   if (!response.ok) {
@@ -396,8 +386,7 @@ export async function doubtSolverChat(
   message: string,
   conversationHistory: { role: string; content: string }[],
   imageBase64?: string,
-  imageType?: string,
-  sessionId?: string
+  imageType?: string
 ): Promise<{ response: string; image_context?: string | null }> {
   const body: any = {
     message,
@@ -406,9 +395,6 @@ export async function doubtSolverChat(
   if (imageBase64) {
     body.image_base64 = imageBase64
     body.image_type = imageType || 'image/png'
-  }
-  if (sessionId) {
-    body.session_id = sessionId
   }
 
   const response = await fetch(`${API_URL}/api/doubt-solver/chat`, {
@@ -430,23 +416,17 @@ export async function guideChat(
   message: string,
   mode: string,
   context: string,
-  conversationHistory: { role: string; content: string }[],
-  sessionId?: string
+  conversationHistory: { role: string; content: string }[]
 ): Promise<{ response: string }> {
-  const body: any = {
-    message,
-    mode,
-    context,
-    conversation_history: conversationHistory,
-  }
-  if (sessionId) {
-    body.session_id = sessionId
-  }
-
   const response = await fetch(`${API_URL}/api/guide/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      message,
+      mode,
+      context,
+      conversation_history: conversationHistory,
+    }),
   })
 
   if (!response.ok) {

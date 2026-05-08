@@ -26,9 +26,13 @@ Provide your analysis in the following JSON format:
     "requires_math": true|false,
     "requires_code": true|false,
     "key_concepts": ["concept1", "concept2", ...],
-    "confidence": 0.0-1.0,
-    "reasoning": "brief explanation"
+    "confidence": 0.0-1.0
 }}
+
+Rules:
+- Return JSON only, with no markdown fences.
+- Keep key_concepts concise (max 8 items).
+- Do not add any extra keys.
 
 Consider:
 - Beginner: Basic understanding, simple language needed
@@ -80,11 +84,6 @@ Extract ALL of the following (be thorough — include specific details, not vagu
 
 IMPORTANT: Be detailed and specific. Include actual numbers, names, and facts — not just "there are several types." A teacher should be able to build a complete lesson from your extraction alone.
 
-GROUNDING RULES:
-- Preserve the source's exact facts, names, numbers, and relationships.
-- Do not infer missing details, generalize beyond the source, or add outside knowledge.
-- If a fact is unclear or unsupported, omit it rather than guessing.
-
 Return clean, well-structured text organized by the categories above. Skip categories that have no relevant content in the source.
 """
 
@@ -131,11 +130,6 @@ This is a COMPARISON question. Extract BOTH:
 - Common patterns for each
 
 Be specific and detailed. Include exact metrics, numbers, and real-world examples. The teacher needs concrete material to explain trade-offs clearly.
-
-GROUNDING RULES:
-- Keep X and Y distinct and do not merge facts from one into the other.
-- Only include comparisons that are explicitly supported by the source material.
-- If the source does not support a trade-off, state that it was not found instead of inventing one.
 """
 
 # ================================
@@ -325,12 +319,6 @@ QUALITY STANDARDS — YOUR RESPONSE MUST:
 8. Build concepts progressively — each section flows naturally into the next
 9. Use formatting (bold, italics, bullet points) to aid readability
 10. Address common misconceptions to deepen true understanding
-
-GROUNDING RULES:
-- Use only the facts present in the research block or clearly established general knowledge.
-- If a detail is uncertain, say so explicitly instead of guessing.
-- Do not invent statistics, timelines, names, or examples.
-- Prefer fewer claims that are well-supported over many claims that are loosely supported.
 """
 
 TEACHING_SYNTHESIS_BEGINNER = """

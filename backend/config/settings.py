@@ -3,7 +3,6 @@ Configuration management for the AI Research Teaching Agent
 """
 import json
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
 from pydantic import field_validator
 from typing import List
 from functools import lru_cache
@@ -47,7 +46,6 @@ class Settings(BaseSettings):
     search_cache_max_size: int = 256      # Max cached search entries
     max_retries: int = 3
     timeout_seconds: int = 15
-    content_extraction_timeout_seconds: int = 30
     extraction_max_sources: int = 3
 
     # PeCAR / synthesis latency controls
@@ -60,7 +58,8 @@ class Settings(BaseSettings):
     pecar_research_complexity_threshold: float = 0.68
     pecar_general_complexity_threshold: float = 0.50
     pecar_simple_question_chars: int = 70
-    synthesis_timeout_seconds: int = 18
+    synthesis_timeout_seconds: int = 45
+    synthesis_research_chars: int = 2600
     
     # API Configuration
     api_host: str = "0.0.0.0"
@@ -126,15 +125,6 @@ class Settings(BaseSettings):
         except (TypeError, ValueError):
             return 30
         return max(5, min(val, 120))
-
-    @field_validator("content_extraction_timeout_seconds", mode="before")
-    @classmethod
-    def clamp_content_extraction_timeout(cls, v):
-        try:
-            val = int(v)
-        except (TypeError, ValueError):
-            return 30
-        return max(10, min(val, 120))
 
     @field_validator("extraction_max_sources", mode="before")
     @classmethod
@@ -214,13 +204,21 @@ class Settings(BaseSettings):
         try:
             val = int(v)
         except (TypeError, ValueError):
-            return 35
+            return 45
         return max(10, min(val, 120))
+
+    @field_validator("synthesis_research_chars", mode="before")
+    @classmethod
+    def clamp_synthesis_research_chars(cls, v):
+        try:
+            val = int(v)
+        except (TypeError, ValueError):
+            return 2600
+        return max(1000, min(val, 12000))
     
-    model_config = ConfigDict(
-        env_file=str(Path(__file__).resolve().parent.parent / ".env"),
-        case_sensitive=False,
-    )
+    class Config:
+        env_file = str(Path(__file__).resolve().parent.parent / ".env")
+        case_sensitive = False
 
 
 @lru_cache()

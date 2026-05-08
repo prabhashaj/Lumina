@@ -1,0 +1,928 @@
+﻿c:/Users/Vivek/Desktop/newpro/.venv312/Scripts/python.exe : 2026-04-13 
+11:01:53.049 | INFO     | main:research_question:403 - Received research 
+request: What is photosynthesis?...
+At line:1 char:1
++ c:/Users/Vivek/Desktop/newpro/.venv312/Scripts/python.exe run_compreh ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-04-13 11:0...tosynthesis?... 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-04-13 11:01:53.049 | WARNING  | main:_ensure_orchestrator:148 - 
+Orchestrator was None at request time; attempting lazy initialization
+2026-04-13 11:01:53.049 | INFO     | agents.intent_classifier:__init__:160 - 
+Intent Classifier: Using Mistral API
+2026-04-13 11:01:53.867 | INFO     | agents.content_extraction:__init__:26 - 
+Content Extraction: Using Mistral API
+2026-04-13 11:01:54.650 | INFO     | agents.teaching_synthesis:__init__:32 - 
+Teaching Synthesis: Using Mistral API
+2026-04-13 11:01:55.405 | INFO     | graph.orchestrator:process_question:302 - 
+Starting research workflow for: What is photosynthesis?
+2026-04-13 11:01:55.464 | INFO     | 
+graph.orchestrator:classify_intent_node:373 - NODE: Classifying intent...
+2026-04-13 11:01:55.464 | INFO     | agents.intent_classifier:analyze:198 - 
+Analyzing intent for question: What is photosynthesis?...
+2026-04-13 11:02:01.678 | DEBUG    | agents.intent_classifier:analyze:204 - 
+Raw LLM response: ```json
+{
+    "difficulty_level": "beginner",
+    "question_type": "conceptual",
+    "requires_visuals": true,
+    "requires_math": false,
+    "requires_code": false,
+    "key_concepts": [
+        "ph
+2026-04-13 11:02:01.679 | INFO     | agents.intent_classifier:analyze:234 - 
+Intent analysis complete: DifficultyLevel.BEGINNER, QuestionType.CONCEPTUAL
+2026-04-13 11:02:01.689 | INFO     | graph.orchestrator:plan_search_node:382 - 
+NODE: Planning search strategy...
+2026-04-13 11:02:01.689 | INFO     | agents.search_router:plan:282 - 
+SearchRouter plan: complexity=simple, depth=basic, max_results=3, queries=1, 
+raw_content=False, images=True, est_cost_weight=1.0x
+2026-04-13 11:02:01.698 | INFO     | 
+graph.orchestrator:generate_queries_node:404 - NODE: Generating search 
+queries...
+2026-04-13 11:02:01.698 | INFO     | 
+graph.orchestrator:generate_queries_node:427 - Generated 1 search queries 
+(plan: simple)
+2026-04-13 11:02:01.707 | INFO     | graph.orchestrator:search_web_node:433 - 
+NODE: Searching web...
+2026-04-13 11:02:01.707 | INFO     | 
+agents.search_agent:multi_query_search:164 - Executing web query 1/1: What is 
+photosynthesis?
+2026-04-13 11:02:01.708 | INFO     | agents.search_agent:search:71 - Tavily 
+search: depth=basic, max=3, raw=False, images=True | What is photosynthesis?
+2026-04-13 11:02:07.159 | INFO     | agents.search_agent:search:122 - Tavily 
+returned 3 results, 5 images in 5.45s
+2026-04-13 11:02:07.159 | INFO     | 
+agents.search_agent:multi_query_search:193 - Multi-query: 1 queries \u2192 3 
+unique results, 5 images
+2026-04-13 11:02:07.160 | INFO     | graph.orchestrator:search_web_node:471 - 
+Collected 5 strongly deduplicated unique images from search results
+2026-04-13 11:02:07.169 | INFO     | 
+graph.orchestrator:extract_content_node:478 - NODE: Extracting content...
+2026-04-13 11:02:17.861 | INFO     | 
+agents.content_extraction:extract_content:87 - Extracted 5167 chars from 
+https://pmc.ncbi.nlm.nih.gov/articles/PMC5264509/
+2026-04-13 11:02:29.166 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://en.wikipedia.org/wiki/Photosynthesis; using raw snippet fallback
+2026-04-13 11:02:29.177 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://education.nationalgeographic.org/resource/photosynthesis/; using 
+raw snippet fallback
+2026-04-13 11:02:29.177 | INFO     | 
+agents.content_extraction:process_multiple:133 - Processed 3 sources \u2192 3 
+valid extractions
+2026-04-13 11:02:29.193 | INFO     | graph.orchestrator:select_images_node:513 
+- NODE: Selecting images from search results...
+2026-04-13 11:02:29.194 | INFO     | graph.orchestrator:select_images_node:584 
+- Selected 2 unique images from Tavily results
+2026-04-13 11:02:29.210 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:590 - NODE: Running PeCAR reasoning 
+pipeline...
+2026-04-13 11:02:29.210 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:627 - PeCAR skipped: short 
+low-complexity question | mode=research complexity=0.3 qtype=conceptual
+2026-04-13 11:02:29.220 | INFO     | 
+graph.orchestrator:synthesize_teaching_node:712 - NODE: Synthesizing teaching 
+content...
+2026-04-13 11:02:29.221 | INFO     | agents.teaching_synthesis:synthesize:97 - 
+Synthesizing teaching content for: What is photosynthesis?...
+2026-04-13 11:02:56.099 | INFO     | agents.teaching_synthesis:synthesize:173 
+- LLM response length: 12836 chars
+2026-04-13 11:02:56.099 | INFO     | agents.teaching_synthesis:synthesize:174 
+- LLM response preview: ## TL;DR
+
+**Photosynthesis is the magical process that lets plants turn sunlight into 
+foodùliterally cooking their own meals using light, water, and air!** Every 
+green plant, from towering redwoods to tiny blades of grass, acts like a 
+solar-powered kitchen, converting sunlight into sugar (glucose) w...
+2026-04-13 11:02:56.099 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:360 - Parsing teaching 
+content (length: 12836 chars)
+2026-04-13 11:02:56.099 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:361 - First 500 chars: ## 
+TL;DR
+
+**Photosynthesis is the magical process that lets plants turn sunlight into 
+foodùliterally cooking their own meals using light, water, and air!** Every 
+green plant, from towering redwoods to tiny blades of grass, acts like a 
+solar-powered kitchen, converting sunlight into sugar (glucose) while 
+releasing oxygen as a "waste product" (which, luckily for us, keeps us alive). 
+**The single most important thing to remember: Without photosynthesis, there 
+would be no food, no oxygen, and no lif
+2026-04-13 11:02:56.100 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found tldr: 685 
+chars
+2026-04-13 11:02:56.100 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+explanation: 9988 chars
+2026-04-13 11:02:56.101 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+visual_explanation: 1338 chars
+2026-04-13 11:02:56.101 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found analogy: 
+626 chars
+2026-04-13 11:02:56.101 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'practice_questions' not found in response
+2026-04-13 11:02:56.101 | INFO     | agents.teaching_synthesis:synthesize:216 
+- Final practice questions count: 4
+2026-04-13 11:02:56.102 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q1: What is the core idea behind What is photosynthesis??
+2026-04-13 11:02:56.102 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q2: How would you apply What is photosynthesis? in a practical scenario?
+2026-04-13 11:02:56.102 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q3: Why is What is photosynthesis? important, and where does it fail?
+2026-04-13 11:02:56.102 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q4: What would change if a key assumption in What is photosynthesis? was 
+removed?
+2026-04-13 11:02:56.103 | INFO     | agents.teaching_synthesis:synthesize:252 
+- Teaching synthesis complete
+2026-04-13 11:02:56.112 | INFO     | 
+graph.orchestrator:assess_quality_node:751 - NODE: Assessing quality...
+2026-04-13 11:02:56.112 | INFO     | 
+graph.orchestrator:assess_quality_node:777 - Quality score: 1.00
+2026-04-13 11:02:56.117 | INFO     | graph.orchestrator:should_retry:797 - 
+Accepting response with quality score: 1.00
+2026-04-13 11:02:56.118 | INFO     | graph.orchestrator:process_question:358 - 
+Workflow complete in 60.71s
+2026-04-13 11:02:56.125 | INFO     | main:research_question:403 - Received 
+research request: What is photosynthesis?...
+2026-04-13 11:02:56.125 | INFO     | graph.orchestrator:process_question:302 - 
+Starting research workflow for: What is photosynthesis?
+2026-04-13 11:02:56.151 | INFO     | 
+graph.orchestrator:classify_intent_node:373 - NODE: Classifying intent...
+2026-04-13 11:02:56.151 | INFO     | agents.intent_classifier:analyze:198 - 
+Analyzing intent for question: What is photosynthesis?...
+2026-04-13 11:03:01.167 | DEBUG    | agents.intent_classifier:analyze:204 - 
+Raw LLM response: ```json
+{
+    "difficulty_level": "beginner",
+    "question_type": "conceptual",
+    "requires_visuals": true,
+    "requires_math": false,
+    "requires_code": false,
+    "key_concepts": [
+        "ph
+2026-04-13 11:03:01.169 | INFO     | agents.intent_classifier:analyze:234 - 
+Intent analysis complete: DifficultyLevel.BEGINNER, QuestionType.CONCEPTUAL
+2026-04-13 11:03:01.190 | INFO     | graph.orchestrator:plan_search_node:382 - 
+NODE: Planning search strategy...
+2026-04-13 11:03:01.191 | INFO     | agents.search_router:plan:282 - 
+SearchRouter plan: complexity=simple, depth=basic, max_results=3, queries=1, 
+raw_content=False, images=True, est_cost_weight=1.0x
+2026-04-13 11:03:01.202 | INFO     | 
+graph.orchestrator:generate_queries_node:404 - NODE: Generating search 
+queries...
+2026-04-13 11:03:01.202 | INFO     | 
+graph.orchestrator:generate_queries_node:427 - Generated 1 search queries 
+(plan: simple)
+2026-04-13 11:03:01.211 | INFO     | graph.orchestrator:search_web_node:433 - 
+NODE: Searching web...
+2026-04-13 11:03:01.211 | INFO     | 
+agents.search_agent:multi_query_search:164 - Executing web query 1/1: What is 
+photosynthesis?
+2026-04-13 11:03:01.211 | DEBUG    | agents.search_router:get:114 - Search 
+cache HIT for query: What is photosynthesis?
+2026-04-13 11:03:01.211 | INFO     | agents.search_agent:search:64 - 
+[cache-hit] Returning cached results for: What is photosynthesis?
+2026-04-13 11:03:01.212 | INFO     | 
+agents.search_agent:multi_query_search:193 - Multi-query: 1 queries \u2192 3 
+unique results, 5 images
+2026-04-13 11:03:01.212 | INFO     | graph.orchestrator:search_web_node:471 - 
+Collected 5 strongly deduplicated unique images from search results
+2026-04-13 11:03:01.220 | INFO     | 
+graph.orchestrator:extract_content_node:478 - NODE: Extracting content...
+2026-04-13 11:03:13.363 | INFO     | 
+agents.content_extraction:extract_content:87 - Extracted 5987 chars from 
+https://pmc.ncbi.nlm.nih.gov/articles/PMC5264509/
+2026-04-13 11:03:20.531 | INFO     | 
+agents.content_extraction:extract_content:87 - Extracted 8934 chars from 
+https://en.wikipedia.org/wiki/Photosynthesis
+2026-04-13 11:03:23.221 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://education.nationalgeographic.org/resource/photosynthesis/; using 
+raw snippet fallback
+2026-04-13 11:03:23.221 | INFO     | 
+agents.content_extraction:process_multiple:133 - Processed 3 sources \u2192 3 
+valid extractions
+2026-04-13 11:03:23.239 | INFO     | graph.orchestrator:select_images_node:513 
+- NODE: Selecting images from search results...
+2026-04-13 11:03:23.239 | INFO     | graph.orchestrator:select_images_node:584 
+- Selected 2 unique images from Tavily results
+2026-04-13 11:03:23.256 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:590 - NODE: Running PeCAR reasoning 
+pipeline...
+2026-04-13 11:03:23.256 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:627 - PeCAR skipped: short 
+low-complexity question | mode=research complexity=0.3 qtype=conceptual
+2026-04-13 11:03:23.264 | INFO     | 
+graph.orchestrator:synthesize_teaching_node:712 - NODE: Synthesizing teaching 
+content...
+2026-04-13 11:03:23.265 | INFO     | agents.teaching_synthesis:synthesize:97 - 
+Synthesizing teaching content for: What is photosynthesis?...
+2026-04-13 11:03:52.448 | INFO     | agents.teaching_synthesis:synthesize:173 
+- LLM response length: 12301 chars
+2026-04-13 11:03:52.449 | INFO     | agents.teaching_synthesis:synthesize:174 
+- LLM response preview: ## **TL;DR**
+**Photosynthesis is how plants, algae, and some bacteria use sunlight to turn 
+carbon dioxide (CO\u2082) and water (H\u2082O) into sugar (glucose) and oxygen 
+(O\u2082).** ItÆs the ultimate source of *all* the food we eat and *all* the 
+oxygen we breatheùwithout it, life on Earth as we know it wouldnÆt e...
+2026-04-13 11:03:52.449 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:360 - Parsing teaching 
+content (length: 12301 chars)
+2026-04-13 11:03:52.449 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:361 - First 500 chars: ## 
+**TL;DR**
+**Photosynthesis is how plants, algae, and some bacteria use sunlight to turn 
+carbon dioxide (CO\u2082) and water (H\u2082O) into sugar (glucose) and oxygen 
+(O\u2082).** ItÆs the ultimate source of *all* the food we eat and *all* the 
+oxygen we breatheùwithout it, life on Earth as we know it wouldnÆt exist. 
+Think of it as natureÆs solar-powered kitchen, where sunlight is the chef, 
+leaves are the pots, and the recipe creates both food and fresh air. **The 
+most important thing to remember: Photosynth
+2026-04-13 11:03:52.449 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found tldr: 575 
+chars
+2026-04-13 11:03:52.450 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+explanation: 10890 chars
+2026-04-13 11:03:52.450 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+visual_explanation: 685 chars
+2026-04-13 11:03:52.450 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 'analogy' not 
+found in response
+2026-04-13 11:03:52.450 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'practice_questions' not found in response
+2026-04-13 11:03:52.451 | INFO     | agents.teaching_synthesis:synthesize:216 
+- Final practice questions count: 4
+2026-04-13 11:03:52.451 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q1: What is the core idea behind What is photosynthesis??
+2026-04-13 11:03:52.451 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q2: How would you apply What is photosynthesis? in a practical scenario?
+2026-04-13 11:03:52.451 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q3: Why is What is photosynthesis? important, and where does it fail?
+2026-04-13 11:03:52.451 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q4: What would change if a key assumption in What is photosynthesis? was 
+removed?
+2026-04-13 11:03:52.452 | INFO     | agents.teaching_synthesis:synthesize:252 
+- Teaching synthesis complete
+2026-04-13 11:03:52.488 | INFO     | 
+graph.orchestrator:assess_quality_node:751 - NODE: Assessing quality...
+2026-04-13 11:03:52.488 | INFO     | 
+graph.orchestrator:assess_quality_node:777 - Quality score: 0.80
+2026-04-13 11:03:52.493 | INFO     | graph.orchestrator:should_retry:797 - 
+Accepting response with quality score: 0.80
+2026-04-13 11:03:52.496 | INFO     | graph.orchestrator:process_question:358 - 
+Workflow complete in 56.37s
+2026-04-13 11:03:52.502 | INFO     | main:generate_stream:441 - Starting 
+streaming research: What is photosynthesis?...
+2026-04-13 11:03:52.503 | INFO     | graph.orchestrator:process_question:302 - 
+Starting research workflow for: What is photosynthesis?
+2026-04-13 11:03:52.522 | INFO     | main:generate_stream:493 - STREAM stage: 
+Starting research workflow...
+2026-04-13 11:03:52.530 | INFO     | 
+graph.orchestrator:classify_intent_node:373 - NODE: Classifying intent...
+2026-04-13 11:03:52.530 | INFO     | agents.intent_classifier:analyze:198 - 
+Analyzing intent for question: What is photosynthesis?...
+2026-04-13 11:03:52.531 | INFO     | main:generate_stream:493 - STREAM stage: 
+Classifying question intent...
+2026-04-13 11:03:57.591 | DEBUG    | agents.intent_classifier:analyze:204 - 
+Raw LLM response: ```json
+{
+    "difficulty_level": "beginner",
+    "question_type": "conceptual",
+    "requires_visuals": true,
+    "requires_math": false,
+    "requires_code": false,
+    "key_concepts": [
+        "ph
+2026-04-13 11:03:57.592 | INFO     | agents.intent_classifier:analyze:234 - 
+Intent analysis complete: DifficultyLevel.BEGINNER, QuestionType.CONCEPTUAL
+2026-04-13 11:03:57.601 | INFO     | graph.orchestrator:plan_search_node:382 - 
+NODE: Planning search strategy...
+2026-04-13 11:03:57.601 | INFO     | agents.search_router:plan:282 - 
+SearchRouter plan: complexity=simple, depth=basic, max_results=3, queries=1, 
+raw_content=False, images=True, est_cost_weight=1.0x
+2026-04-13 11:03:57.601 | INFO     | main:generate_stream:493 - STREAM stage: 
+Planning search strategy...
+2026-04-13 11:03:57.609 | INFO     | 
+graph.orchestrator:generate_queries_node:404 - NODE: Generating search 
+queries...
+2026-04-13 11:03:57.609 | INFO     | 
+graph.orchestrator:generate_queries_node:427 - Generated 1 search queries 
+(plan: simple)
+2026-04-13 11:03:57.609 | INFO     | main:generate_stream:493 - STREAM stage: 
+Generating optimized search queries...
+2026-04-13 11:03:57.633 | INFO     | graph.orchestrator:search_web_node:433 - 
+NODE: Searching web...
+2026-04-13 11:03:57.633 | INFO     | 
+agents.search_agent:multi_query_search:164 - Executing web query 1/1: What is 
+photosynthesis?
+2026-04-13 11:03:57.633 | DEBUG    | agents.search_router:get:114 - Search 
+cache HIT for query: What is photosynthesis?
+2026-04-13 11:03:57.634 | INFO     | agents.search_agent:search:64 - 
+[cache-hit] Returning cached results for: What is photosynthesis?
+2026-04-13 11:03:57.634 | INFO     | 
+agents.search_agent:multi_query_search:193 - Multi-query: 1 queries \u2192 3 
+unique results, 5 images
+2026-04-13 11:03:57.634 | INFO     | graph.orchestrator:search_web_node:471 - 
+Collected 5 strongly deduplicated unique images from search results
+2026-04-13 11:03:57.634 | INFO     | main:generate_stream:493 - STREAM stage: 
+Searching web sources (1 query)...
+2026-04-13 11:03:57.647 | INFO     | 
+graph.orchestrator:extract_content_node:478 - NODE: Extracting content...
+2026-04-13 11:03:57.647 | INFO     | main:generate_stream:493 - STREAM stage: 
+Extracting relevant content from sources...
+2026-04-13 11:04:02.647 | INFO     | 
+agents.content_extraction:extract_content:87 - Extracted 2649 chars from 
+https://pmc.ncbi.nlm.nih.gov/articles/PMC5264509/
+2026-04-13 11:04:05.666 | INFO     | main:generate_stream:500 - STREAM 
+heartbeat: Still working: Extracting relevant content from sources...
+2026-04-13 11:04:13.700 | INFO     | main:generate_stream:500 - STREAM 
+heartbeat: Still working: Extracting relevant content from sources...
+2026-04-13 11:04:19.191 | INFO     | 
+agents.content_extraction:extract_content:87 - Extracted 9356 chars from 
+https://education.nationalgeographic.org/resource/photosynthesis/
+2026-04-13 11:04:19.653 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://en.wikipedia.org/wiki/Photosynthesis; using raw snippet fallback
+2026-04-13 11:04:19.654 | INFO     | 
+agents.content_extraction:process_multiple:133 - Processed 3 sources \u2192 3 
+valid extractions
+2026-04-13 11:04:19.669 | INFO     | graph.orchestrator:select_images_node:513 
+- NODE: Selecting images from search results...
+2026-04-13 11:04:19.669 | INFO     | graph.orchestrator:select_images_node:584 
+- Selected 2 unique images from Tavily results
+2026-04-13 11:04:19.669 | INFO     | main:generate_stream:493 - STREAM stage: 
+Selecting visual references...
+2026-04-13 11:04:19.687 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:590 - NODE: Running PeCAR reasoning 
+pipeline...
+2026-04-13 11:04:19.687 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:627 - PeCAR skipped: short 
+low-complexity question | mode=research complexity=0.3 qtype=conceptual
+2026-04-13 11:04:19.688 | INFO     | main:generate_stream:493 - STREAM stage: 
+Evaluating whether deep reasoning (PeCAR) is needed...
+2026-04-13 11:04:19.697 | INFO     | 
+graph.orchestrator:synthesize_teaching_node:712 - NODE: Synthesizing teaching 
+content...
+2026-04-13 11:04:19.697 | INFO     | agents.teaching_synthesis:synthesize:97 - 
+Synthesizing teaching content for: What is photosynthesis?...
+2026-04-13 11:04:19.698 | INFO     | main:generate_stream:493 - STREAM stage: 
+Synthesizing teaching response...
+2026-04-13 11:04:27.703 | INFO     | main:generate_stream:500 - STREAM 
+heartbeat: Still working: Synthesizing teaching response...
+2026-04-13 11:04:35.746 | INFO     | main:generate_stream:500 - STREAM 
+heartbeat: Still working: Synthesizing teaching response...
+2026-04-13 11:04:43.775 | INFO     | main:generate_stream:500 - STREAM 
+heartbeat: Still working: Synthesizing teaching response...
+2026-04-13 11:04:48.053 | INFO     | agents.teaching_synthesis:synthesize:173 
+- LLM response length: 12080 chars
+2026-04-13 11:04:48.053 | INFO     | agents.teaching_synthesis:synthesize:174 
+- LLM response preview: ## TL;DR
+
+**Photosynthesis is how plants, algae, and some bacteria use sunlight to turn 
+water and carbon dioxide into food (glucose) and oxygen.** ItÆs the *magic 
+trick* that powers nearly all life on Earthùwithout it, we wouldnÆt have food 
+to eat, oxygen to breathe, or even fossil fuels to power ou...
+2026-04-13 11:04:48.054 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:360 - Parsing teaching 
+content (length: 12080 chars)
+2026-04-13 11:04:48.055 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:361 - First 500 chars: ## 
+TL;DR
+
+**Photosynthesis is how plants, algae, and some bacteria use sunlight to turn 
+water and carbon dioxide into food (glucose) and oxygen.** ItÆs the *magic 
+trick* that powers nearly all life on Earthùwithout it, we wouldnÆt have food 
+to eat, oxygen to breathe, or even fossil fuels to power our cars. **The most 
+important thing to remember?** Photosynthesis is the ultimate energy 
+converter: it takes light from the sun (which we canÆt eat) and transforms it 
+into chemical energy (sugar) that 
+2026-04-13 11:04:48.056 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found tldr: 546 
+chars
+2026-04-13 11:04:48.058 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+explanation: 8031 chars
+2026-04-13 11:04:48.060 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+visual_explanation: 1048 chars
+2026-04-13 11:04:48.061 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found analogy: 
+962 chars
+2026-04-13 11:04:48.062 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:412 - Parsing practice 
+questions from 4 lines
+2026-04-13 11:04:48.062 | DEBUG    | 
+agents.teaching_synthesis:_parse_teaching_content:447 - Skipping numbered 
+label: **What are the three main ingredients plants need for photosynthesis, 
+and where do they get each one?**
+2026-04-13 11:04:48.063 | DEBUG    | 
+agents.teaching_synthesis:_parse_teaching_content:447 - Skipping numbered 
+label: **Explain the difference between the light-dependent reactions and the 
+Calvin Cycle. Why are both stages necessary?**
+2026-04-13 11:04:48.063 | DEBUG    | 
+agents.teaching_synthesis:_parse_teaching_content:447 - Skipping numbered 
+label: **If a plantÆs leaves turn yellow (losing chlorophyll), how would this 
+affect its ability to photosynthesize? Why?**
+2026-04-13 11:04:48.064 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:463 - Found numbered 
+question: **How is the oxygen...
+2026-04-13 11:04:48.064 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:477 - Added question 1: 
+**How is the oxygen...
+2026-04-13 11:04:48.065 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:482 - \u2713 Parsed 1 UNIQUE 
+practice questions (removed 0 duplicates)
+2026-04-13 11:04:48.066 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found 
+practice_questions: 370 chars
+2026-04-13 11:04:48.067 | INFO     | agents.teaching_synthesis:synthesize:216 
+- Final practice questions count: 4
+2026-04-13 11:04:48.067 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q1: **How is the oxygen
+2026-04-13 11:04:48.068 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q2: What is the core idea behind What is photosynthesis??
+2026-04-13 11:04:48.069 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q3: How would you apply What is photosynthesis? in a practical scenario?
+2026-04-13 11:04:48.070 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q4: Why is What is photosynthesis? important, and where does it fail?
+2026-04-13 11:04:48.070 | INFO     | agents.teaching_synthesis:synthesize:252 
+- Teaching synthesis complete
+2026-04-13 11:04:48.096 | INFO     | 
+graph.orchestrator:assess_quality_node:751 - NODE: Assessing quality...
+2026-04-13 11:04:48.096 | INFO     | 
+graph.orchestrator:assess_quality_node:777 - Quality score: 1.00
+2026-04-13 11:04:48.096 | INFO     | main:generate_stream:493 - STREAM stage: 
+Assessing response quality...
+2026-04-13 11:04:48.106 | INFO     | graph.orchestrator:should_retry:797 - 
+Accepting response with quality score: 1.00
+2026-04-13 11:04:48.109 | INFO     | graph.orchestrator:process_question:358 - 
+Workflow complete in 55.61s
+2026-04-13 11:04:48.109 | INFO     | main:generate_stream:493 - STREAM stage: 
+Final answer ready
+2026-04-13 11:04:48.111 | INFO     | main:generate_stream:533 - Streaming 4 
+practice questions
+2026-04-13 11:04:48.111 | INFO     | main:generate_stream:535 -   Streaming 
+Q1: **How is the oxygen
+2026-04-13 11:04:48.112 | INFO     | main:generate_stream:535 -   Streaming 
+Q2: What is the core idea behind What is photosynthesis??
+2026-04-13 11:04:48.112 | INFO     | main:generate_stream:535 -   Streaming 
+Q3: How would you apply What is photosynthesis? in a practical scenario?
+2026-04-13 11:04:48.112 | INFO     | main:generate_stream:535 -   Streaming 
+Q4: Why is What is photosynthesis? important, and where does it fail?
+2026-04-13 11:04:48.121 | INFO     | main:upload_image:592 - Received image 
+upload: test.pdf, size: 11
+2026-04-13 11:04:48.135 | INFO     | main:upload_and_extract_file:627 - 
+Received file upload: test.exe
+2026-04-13 11:04:48.141 | INFO     | main:upload_image:592 - Received image 
+upload: test.png, size: 68
+2026-04-13 11:04:48.145 | INFO     | main:upload_and_extract_file:627 - 
+Received file upload: sample.txt
+2026-04-13 11:04:48.149 | INFO     | main:upload_and_extract_file:627 - 
+Received file upload: sample.docx
+2026-04-13 11:04:48.252 | INFO     | main:upload_and_extract_file:627 - 
+Received file upload: large.txt
+2026-04-13 11:04:48.274 | INFO     | main:generate_exam_roadmap:754 - 
+Generating exam prep roadmap for: Biology
+2026-04-13 11:04:57.157 | INFO     | graph.orchestrator:process_question:302 - 
+Starting research workflow for: Explain 'Photosynthesis' in the context of 
+Plants (Biology). Provide a thorough, educational explanation suitable for 
+exam preparation.
+2026-04-13 11:04:57.183 | INFO     | 
+graph.orchestrator:classify_intent_node:373 - NODE: Classifying intent...
+2026-04-13 11:04:57.183 | INFO     | agents.intent_classifier:analyze:198 - 
+Analyzing intent for question: Explain 'Photosynthesis' in the context of 
+Plants (Biology). Provide a thorough, educational explana...
+2026-04-13 11:05:05.933 | DEBUG    | agents.intent_classifier:analyze:204 - 
+Raw LLM response: ```json
+{
+    "difficulty_level": "beginner",
+    "question_type": "conceptual",
+    "requires_visuals": true,
+    "requires_math": false,
+    "requires_code": false,
+    "key_concepts": [
+        "ph
+2026-04-13 11:05:05.934 | WARNING  | 
+agents.intent_classifier:extract_json_from_response:133 - Recovered partial 
+intent JSON from truncated model output
+2026-04-13 11:05:05.934 | INFO     | agents.intent_classifier:analyze:234 - 
+Intent analysis complete: DifficultyLevel.BEGINNER, QuestionType.CONCEPTUAL
+2026-04-13 11:05:05.941 | INFO     | graph.orchestrator:plan_search_node:382 - 
+NODE: Planning search strategy...
+2026-04-13 11:05:05.941 | INFO     | agents.search_router:plan:282 - 
+SearchRouter plan: complexity=complex, depth=basic, max_results=5, queries=2, 
+raw_content=False, images=True, est_cost_weight=2.0x
+2026-04-13 11:05:05.950 | INFO     | 
+graph.orchestrator:generate_queries_node:404 - NODE: Generating search 
+queries...
+2026-04-13 11:05:05.950 | INFO     | 
+graph.orchestrator:generate_queries_node:427 - Generated 1 search queries 
+(plan: complex)
+2026-04-13 11:05:05.962 | INFO     | graph.orchestrator:search_web_node:433 - 
+NODE: Searching web...
+2026-04-13 11:05:05.963 | INFO     | 
+agents.search_agent:multi_query_search:164 - Executing web query 1/1: Explain 
+'Photosynthesis' in the context of Plants (Biology). Provide a thorough, 
+educational explana
+2026-04-13 11:05:05.963 | INFO     | agents.search_agent:search:71 - Tavily 
+search: depth=basic, max=5, raw=False, images=True | Explain 'Photosynthesis' 
+in the context of Plants (Biology). Provide a thorough,
+2026-04-13 11:05:06.221 | INFO     | agents.search_agent:search:122 - Tavily 
+returned 5 results, 5 images in 0.26s
+2026-04-13 11:05:06.222 | INFO     | 
+agents.search_agent:multi_query_search:193 - Multi-query: 1 queries \u2192 5 
+unique results, 5 images
+2026-04-13 11:05:06.224 | INFO     | graph.orchestrator:search_web_node:471 - 
+Collected 5 strongly deduplicated unique images from search results
+2026-04-13 11:05:06.264 | INFO     | 
+graph.orchestrator:extract_content_node:478 - NODE: Extracting content...
+2026-04-13 11:05:28.277 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://academytrust.sgscol.ac.uk/media/GCSE-100-Day-Plan-2026.pdf; using 
+raw snippet fallback
+2026-04-13 11:05:28.279 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://www.pwcs.edu/learning_activities/academics/science/curriculum; 
+using raw snippet fallback
+2026-04-13 11:05:28.279 | WARNING  | 
+agents.content_extraction:extract_content:91 - Content extraction timed out 
+for https://extension.berkeley.edu/academic-areas/sciences-and-biotechnology/; 
+using raw snippet fallback
+2026-04-13 11:05:28.280 | INFO     | 
+agents.content_extraction:process_multiple:133 - Processed 3 sources \u2192 3 
+valid extractions
+2026-04-13 11:05:28.313 | INFO     | graph.orchestrator:select_images_node:513 
+- NODE: Selecting images from search results...
+2026-04-13 11:05:28.314 | INFO     | graph.orchestrator:select_images_node:584 
+- Selected 2 unique images from Tavily results
+2026-04-13 11:05:28.330 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:590 - NODE: Running PeCAR reasoning 
+pipeline...
+2026-04-13 11:05:28.330 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:627 - PeCAR skipped: research query is 
+likely direct/extractive | mode=research complexity=0.3 qtype=conceptual
+2026-04-13 11:05:28.339 | INFO     | 
+graph.orchestrator:synthesize_teaching_node:712 - NODE: Synthesizing teaching 
+content...
+2026-04-13 11:05:28.339 | INFO     | agents.teaching_synthesis:synthesize:97 - 
+Synthesizing teaching content for: Explain 'Photosynthesis' in the context of 
+Plants ...
+2026-04-13 11:05:57.077 | INFO     | agents.teaching_synthesis:synthesize:173 
+- LLM response length: 11858 chars
+2026-04-13 11:05:57.077 | INFO     | agents.teaching_synthesis:synthesize:174 
+- LLM response preview: # **TL;DR**
+**Photosynthesis is how plants use sunlight to turn carbon dioxide (CO\u2082) 
+and water (H\u2082O) into glucose (sugar) and oxygen (O\u2082).** Inside plant 
+cells, tiny structures called **chloroplasts** (filled with green 
+**chlorophyll**) act like solar-powered factories, converting light energy 
+into ...
+2026-04-13 11:05:57.078 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:360 - Parsing teaching 
+content (length: 11858 chars)
+2026-04-13 11:05:57.079 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:361 - First 500 chars: # 
+**TL;DR**
+**Photosynthesis is how plants use sunlight to turn carbon dioxide (CO\u2082) 
+and water (H\u2082O) into glucose (sugar) and oxygen (O\u2082).** Inside plant 
+cells, tiny structures called **chloroplasts** (filled with green 
+**chlorophyll**) act like solar-powered factories, converting light energy 
+into chemical energy. This process not only feeds the plant but also produces 
+the oxygen we breatheùmaking it the foundation of life on Earth. **The most 
+important insight?** Without photosynthesis, there 
+2026-04-13 11:05:57.081 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found tldr: 
+11819 chars
+2026-04-13 11:05:57.082 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 'explanation' 
+not found in response
+2026-04-13 11:05:57.083 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'visual_explanation' not found in response
+2026-04-13 11:05:57.084 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 'analogy' not 
+found in response
+2026-04-13 11:05:57.085 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'practice_questions' not found in response
+2026-04-13 11:05:57.086 | INFO     | agents.teaching_synthesis:synthesize:216 
+- Final practice questions count: 4
+2026-04-13 11:05:57.086 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q1: What is the core idea behind Explain 'Photosynthesis' in the context 
+of Plants (
+2026-04-13 11:05:57.087 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q2: How would you apply Explain 'Photosynthesis' in the context of Plants 
+(Biology).
+2026-04-13 11:05:57.088 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q3: Why is Explain 'Photosynthesis' in the context of Plants (Biology). 
+Provide a th
+2026-04-13 11:05:57.089 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q4: What would change if a key assumption in Explain 'Photosynthesis' in 
+the context
+2026-04-13 11:05:57.089 | INFO     | agents.teaching_synthesis:synthesize:252 
+- Teaching synthesis complete
+2026-04-13 11:05:57.117 | INFO     | 
+graph.orchestrator:assess_quality_node:751 - NODE: Assessing quality...
+2026-04-13 11:05:57.118 | INFO     | 
+graph.orchestrator:assess_quality_node:777 - Quality score: 0.50
+2026-04-13 11:05:57.124 | INFO     | graph.orchestrator:should_retry:797 - 
+Accepting response with quality score: 0.50
+2026-04-13 11:05:57.126 | INFO     | graph.orchestrator:process_question:358 - 
+Workflow complete in 59.97s
+2026-04-13 11:05:57.133 | INFO     | main:generate_topic_quiz:886 - Generating 
+quiz for topic: Photosynthesis
+2026-04-13 11:05:57.850 | INFO     | main:generate_topic_quiz:938 - Trying 
+quiz generation with: teaching_agent
+2026-04-13 11:06:10.788 | INFO     | main:generate_topic_quiz:942 - Quiz LLM 
+response from teaching_agent: 3327 chars
+2026-04-13 11:06:10.842 | INFO     | main:generate_assessment:1000 - 
+Generating assessment for topic: Photosynthesis
+2026-04-13 11:06:17.898 | INFO     | main:analyze_learner_profile:1074 - 
+Analyzing learner profile for: Photosynthesis
+2026-04-13 11:06:27.585 | INFO     | graph.orchestrator:process_question:302 - 
+Starting research workflow for: Teach me about 'Photosynthesis' as part of 
+learning Biology (Phase: Foundation).
+
+CRITICAL PERSONALIZATION CONTEXT:
+- My knowledge level: beginner
+- My strong areas: plants
+- My weak areas that need attention: inputs
+- Recommended teaching approach: scaffolded
+- My preferred learning style: example-driven
+
+TEACHING INSTRUCTIONS:
+- Lead with concrete examples before theory. Use real-world scenarios 
+extensively.
+- Start from absolute basics, assume no prior knowledge. Use everyday 
+analogies.
+- 
+- 
+- Explicitly connect new concepts to my strong areas (plants) to aid 
+understanding
+- Pay extra attention to my weak areas: inputs
+- Include checkpoint questions throughout to verify understanding
+- End with a "Am I ready to move on?" self-check section
+
+Provide a comprehensive, personalized explanation.
+2026-04-13 11:06:27.632 | INFO     | 
+graph.orchestrator:classify_intent_node:373 - NODE: Classifying intent...
+2026-04-13 11:06:27.632 | INFO     | agents.intent_classifier:analyze:198 - 
+Analyzing intent for question: Teach me about 'Photosynthesis' as part of 
+learning Biology (Phase: Foundation).
+
+CRITICAL PERSONALI...
+2026-04-13 11:06:34.809 | DEBUG    | agents.intent_classifier:analyze:204 - 
+Raw LLM response: ```json
+{
+    "difficulty_level": "beginner",
+    "question_type": "conceptual",
+    "requires_visuals": true,
+    "requires_math": false,
+    "requires_code": false,
+    "key_concepts": [
+        "ph
+2026-04-13 11:06:34.810 | WARNING  | 
+agents.intent_classifier:extract_json_from_response:133 - Recovered partial 
+intent JSON from truncated model output
+2026-04-13 11:06:34.810 | INFO     | agents.intent_classifier:analyze:234 - 
+Intent analysis complete: DifficultyLevel.BEGINNER, QuestionType.CONCEPTUAL
+2026-04-13 11:06:34.818 | INFO     | graph.orchestrator:plan_search_node:382 - 
+NODE: Planning search strategy...
+2026-04-13 11:06:34.818 | INFO     | agents.search_router:plan:282 - 
+SearchRouter plan: complexity=complex, depth=basic, max_results=5, queries=2, 
+raw_content=False, images=True, est_cost_weight=2.0x
+2026-04-13 11:06:34.825 | INFO     | 
+graph.orchestrator:generate_queries_node:404 - NODE: Generating search 
+queries...
+2026-04-13 11:06:34.826 | INFO     | 
+graph.orchestrator:generate_queries_node:427 - Generated 1 search queries 
+(plan: complex)
+2026-04-13 11:06:34.835 | INFO     | graph.orchestrator:search_web_node:433 - 
+NODE: Searching web...
+2026-04-13 11:06:34.835 | INFO     | 
+agents.search_agent:multi_query_search:164 - Executing web query 1/1: Teach me 
+about 'Photosynthesis' as part of learning Biology (Phase: Foundation).
+
+CRITICAL PERSONALI
+2026-04-13 11:06:34.836 | INFO     | agents.search_agent:search:71 - Tavily 
+search: depth=basic, max=5, raw=False, images=True | Teach me about 
+'Photosynthesis' as part of learning Biology (Phase: Foundation).
+2026-04-13 11:06:35.115 | ERROR    | agents.search_agent:search:138 - Search 
+error: Query is too long. Max query length is 400 characters.
+2026-04-13 11:06:35.116 | INFO     | 
+agents.search_agent:multi_query_search:193 - Multi-query: 1 queries \u2192 0 
+unique results, 0 images
+2026-04-13 11:06:35.116 | INFO     | graph.orchestrator:search_web_node:471 - 
+Collected 0 strongly deduplicated unique images from search results
+2026-04-13 11:06:35.124 | INFO     | 
+graph.orchestrator:extract_content_node:478 - NODE: Extracting content...
+2026-04-13 11:06:35.124 | INFO     | 
+agents.content_extraction:process_multiple:133 - Processed 0 sources \u2192 0 
+valid extractions
+2026-04-13 11:06:35.137 | INFO     | graph.orchestrator:select_images_node:513 
+- NODE: Selecting images from search results...
+2026-04-13 11:06:35.137 | INFO     | graph.orchestrator:select_images_node:542 
+- No images from primary search ù running dedicated image search...
+2026-04-13 11:06:35.137 | INFO     | agents.search_agent:search:71 - Tavily 
+search: depth=basic, max=3, raw=False, images=True | Photosynthesis diagram 
+illustration
+2026-04-13 11:06:35.642 | INFO     | agents.search_agent:search:122 - Tavily 
+returned 3 results, 5 images in 0.51s
+2026-04-13 11:06:35.643 | INFO     | graph.orchestrator:select_images_node:565 
+- Dedicated image search found 5 images
+2026-04-13 11:06:35.643 | INFO     | graph.orchestrator:select_images_node:584 
+- Selected 2 unique images from Tavily results
+2026-04-13 11:06:35.661 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:590 - NODE: Running PeCAR reasoning 
+pipeline...
+2026-04-13 11:06:35.662 | INFO     | 
+graph.orchestrator:pecar_reasoning_node:627 - PeCAR skipped: no extracted 
+context available | mode=research complexity=0.3 qtype=conceptual
+2026-04-13 11:06:35.672 | INFO     | 
+graph.orchestrator:synthesize_teaching_node:712 - NODE: Synthesizing teaching 
+content...
+2026-04-13 11:06:35.672 | INFO     | agents.teaching_synthesis:synthesize:97 - 
+Synthesizing teaching content for: Teach me about 'Photosynthesis' as part of 
+learnin...
+2026-04-13 11:07:01.669 | INFO     | agents.teaching_synthesis:synthesize:173 
+- LLM response length: 11121 chars
+2026-04-13 11:07:01.670 | INFO     | agents.teaching_synthesis:synthesize:174 
+- LLM response preview: ---
+# **TL;DR**
+
+**Photosynthesis is how plants use sunlight, water, and carbon dioxide 
+(CO\u2082) to make their own food (glucose) and release oxygen as a 
+byproduct.** Think of it as a plantÆs kitchen: sunlight is the stove, water 
+and CO\u2082 are the ingredients, and glucose is the meal that fuels the 
+plant...
+2026-04-13 11:07:01.670 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:360 - Parsing teaching 
+content (length: 11121 chars)
+2026-04-13 11:07:01.670 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:361 - First 500 chars: ---
+# **TL;DR**
+
+**Photosynthesis is how plants use sunlight, water, and carbon dioxide 
+(CO\u2082) to make their own food (glucose) and release oxygen as a 
+byproduct.** Think of it as a plantÆs kitchen: sunlight is the stove, water 
+and CO\u2082 are the ingredients, and glucose is the meal that fuels the 
+plantÆs growth. **The most important thing to remember?** Without 
+photosynthesis, there would be no oxygen for us to breathe, no plants for 
+food, and no life as we know it on Earth.
+
+---
+# **Step-by-Step E
+2026-04-13 11:07:01.671 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found tldr: 
+3039 chars
+2026-04-13 11:07:01.671 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 'explanation' 
+not found in response
+2026-04-13 11:07:01.671 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'visual_explanation' not found in response
+2026-04-13 11:07:01.671 | INFO     | 
+agents.teaching_synthesis:_parse_teaching_content:500 - \u2713 Found analogy: 
+1413 chars
+2026-04-13 11:07:01.672 | WARNING  | 
+agents.teaching_synthesis:_parse_teaching_content:504 - Section 
+'practice_questions' not found in response
+2026-04-13 11:07:01.672 | INFO     | agents.teaching_synthesis:synthesize:216 
+- Final practice questions count: 4
+2026-04-13 11:07:01.672 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q1: What is the core idea behind Teach me about 'Photosynthesis' as part 
+of learning
+2026-04-13 11:07:01.672 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q2: How would you apply Teach me about 'Photosynthesis' as part of 
+learning Biology 
+2026-04-13 11:07:01.673 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q3: Why is Teach me about 'Photosynthesis' as part of learning Biology 
+(Phase: Found
+2026-04-13 11:07:01.673 | INFO     | agents.teaching_synthesis:synthesize:218 
+-   Q4: What would change if a key assumption in Teach me about 
+'Photosynthesis' as part
+2026-04-13 11:07:01.673 | INFO     | agents.teaching_synthesis:synthesize:252 
+- Teaching synthesis complete
+2026-04-13 11:07:01.683 | INFO     | 
+graph.orchestrator:assess_quality_node:751 - NODE: Assessing quality...
+2026-04-13 11:07:01.683 | INFO     | 
+graph.orchestrator:assess_quality_node:777 - Quality score: 0.50
+2026-04-13 11:07:01.689 | INFO     | graph.orchestrator:should_retry:797 - 
+Accepting response with quality score: 0.50
+2026-04-13 11:07:01.691 | INFO     | graph.orchestrator:process_question:358 - 
+Workflow complete in 34.11s
+2026-04-13 11:07:01.710 | INFO     | agents.slide_generator:__init__:265 - 
+Slide Generator: Using Mistral API
+2026-04-13 11:07:02.616 | INFO     | 
+agents.slide_generator:generate_slides:446 - Generating 6 slides for topic: 
+Photosynthesis (attempt 1)
+2026-04-13 11:07:19.969 | INFO     | 
+agents.slide_generator:generate_slides:483 - Generated 6 slides successfully
+2026-04-13 11:07:54.884 | INFO     | main:_resolve_slide_images:1387 - 
+Resolved images for 6/6 slides (6 queries)
+2026-04-13 11:07:54.891 | INFO     | 
+agents.slide_generator:generate_slides:446 - Generating 6 slides for topic: 
+Photosynthesis (attempt 1)
+2026-04-13 11:08:33.899 | INFO     | 
+agents.slide_generator:generate_slides:483 - Generated 6 slides successfully
+2026-04-13 11:09:02.108 | INFO     | main:_resolve_slide_images:1387 - 
+Resolved images for 6/6 slides (6 queries)
+2026-04-13 11:09:02.118 | INFO     | main:doubt_solver:1547 - Doubt solver 
+upload: test.txt
+2026-04-13 11:09:02.125 | INFO     | main:doubt_solver:1547 - Doubt solver 
+upload: test.png
+2026-04-13 11:09:02.125 | INFO     | main:_get_doubt_solver_llm:305 - 
+Initializing Doubt Solver with Mistral API
+PASS FastAPI imports successful
+
+======================================================================
+MODULE 1: Platform Health and Configuration (TC01-TC06)
+======================================================================
+PASS TC01: Root health endpoint returns all required fields
+PASS TC02: Detailed health endpoint returns orchestrator status
+PASS TC03: Config endpoint returns non-sensitive configuration
+PASS TC04: CORS preflight is accepted
+PASS TC05: Invalid method returns method not allowed
+SKIP TC06: Service unavailable path (skipped: Requires orchestrator mock)
+
+======================================================================
+MODULE 2: Research Mode APIs and Streaming (TC07-TC18)
+======================================================================
+PASS TC08: Research validation rejects too-short question
+PASS TC09: Research validation rejects too-long question
+PASS TC10: Research accepts attachment context fields
+PASS TC07: Research endpoint returns full response schema
+PASS TC11: Research stream emits status and complete events
+PASS TC12: Research stream emits source citations
+PASS TC14: Research endpoint handles conversation history
+PASS TC15: Research response includes difficulty level enum
+PASS TC16: Research response includes practice questions list
+PASS TC17: Research response processing time is positive
+PASS TC18: Research stream completes without duplicate terminal events
+
+======================================================================
+MODULE 3: File Uploads (TC19-TC26)
+======================================================================
+PASS TC20: Image upload rejects unsupported type
+PASS TC23: File upload rejects unsupported type
+PASS TC19: Image upload accepts supported image types
+PASS TC21: File upload extracts text from TXT/MD/CSV
+PASS TC22: File upload extracts text from DOCX
+PASS TC24: File upload truncates very large extracted text
+PASS TC25: TTS endpoint fallback behavior with normal text
+PASS TC26: TTS endpoint returns provider audio or browser fallback
+
+======================================================================
+MODULE 4: Exam Prep Mode (TC27-TC35)
+======================================================================
+PASS TC28: Roadmap validation rejects missing subject
+PASS TC31: Topic stream validation rejects missing topic
+PASS TC33: Quiz validation rejects missing topic
+PASS TC27: Generate roadmap for valid subject
+PASS TC30: Stream topic content for selected topic
+PASS TC32: Quiz generation for valid topic
+
+======================================================================
+MODULE 5: Personalized Learning Mode (TC36-TC44)
+======================================================================
+PASS TC37: Assessment validation rejects missing topic
+PASS TC39: Profile analysis rejects missing fields
+PASS TC42: Personalized stream rejects missing topic
+PASS TC36: Generate diagnostic assessment
+PASS TC38: Analyze learner profile with valid answers
+PASS TC41: Personalized learning stream for a topic
+
+======================================================================
+MODULE 6: Video Lecture Mode (TC45-TC52)
+======================================================================
+PASS TC46: Video lecture rejects missing topic
+PASS TC48: Video stream rejects missing topic
+PASS TC50: Narrate-slide rejects missing text
+PASS TC45: Generate full video lecture package
+PASS TC47: Stream video lecture generation
+
+======================================================================
+MODULE 7: Doubt Solver Mode (TC53-TC58)
+======================================================================
+PASS TC54: Doubt solver rejects unsupported file type
+PASS TC57: Doubt solver chat rejects empty input
+PASS TC53: Solve doubt from uploaded image
+PASS TC55: Doubt solver chat with text message only
+PASS TC56: Doubt solver chat with image context
+PASS TC58: Doubt solver quota/payment error mapping path reachable
+PASS TC59: Guide chatbot response in mode context
+PASS TC60: Code tutor chat response with coding context
+
+======================================================================
+TEST SUMMARY
+======================================================================
+Total: 50 | Passed: 49 | Failed: 0 | Skipped: 1
+Pass Rate: 98.0%

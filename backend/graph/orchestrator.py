@@ -29,8 +29,6 @@ from pecar.models import DepthConfig, LearnerProfile, LearningMode, PecarIntentA
 # TypedDict schema for LangGraph StateGraph (LangGraph requires TypedDict, not Pydantic)
 class GraphState(TypedDict, total=False):
     original_question: str
-    conversation_history: List[Dict[str, str]]
-    conversation_memory: str
     intent: Optional[IntentAnalysis]
     search_query: Optional[str]
     search_results: List[SearchResult]
@@ -72,72 +70,6 @@ class ResearchOrchestrator:
         except Exception:
             # Progress updates should never break the workflow.
             pass
-
-    @staticmethod
-    def _normalize_conversation_history(history: Any, max_messages: int = 12) -> List[Dict[str, str]]:
-        cleaned: List[Dict[str, str]] = []
-        if not isinstance(history, list):
-            return cleaned
-
-        for item in history:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "user")).strip().lower()
-            if role not in {"user", "assistant", "system"}:
-                role = "user"
-            content = str(item.get("content", "")).strip()
-            if not content:
-                continue
-            cleaned.append({"role": role, "content": content})
-
-        return cleaned[-max_messages:]
-
-    @staticmethod
-    def _build_conversation_memory(history: List[Dict[str, str]], max_chars: int = 1200) -> str:
-        if not history:
-            return ""
-
-        lines: List[str] = []
-        for item in history[-8:]:
-            role = item.get("role", "user").capitalize()
-            content = " ".join(str(item.get("content", "")).split())
-            if len(content) > 260:
-                content = content[:260].rstrip() + "..."
-            lines.append(f"{role}: {content}")
-
-        memory = "\n".join(lines)
-        if len(memory) > max_chars:
-            memory = memory[-max_chars:]
-        return memory
-
-    @staticmethod
-    def _resolve_contextual_question(question: str, history: List[Dict[str, str]]) -> str:
-        """Resolve short follow-up questions against the most recent user topic."""
-        q = (question or "").strip()
-        if not q or not history:
-            return q
-
-        follow_up_signals = (
-            "this", "that", "it", "they", "them", "these", "those",
-            "what about", "how about", "and what", "and how", "practical applications",
-            "more details", "explain more", "elaborate", "what else",
-        )
-        q_lower = q.lower()
-        is_follow_up = len(q.split()) <= 12 or any(signal in q_lower for signal in follow_up_signals)
-        if not is_follow_up:
-            return q
-
-        previous_topic = ""
-        for item in reversed(history):
-            if item.get("role") == "user":
-                previous_topic = item.get("content", "").strip()
-                if previous_topic:
-                    break
-
-        if not previous_topic:
-            return q
-
-        return f"{q} (previous topic: {previous_topic})"
 
     @staticmethod
     def _normalize_learning_mode(learning_mode: str) -> str:
@@ -358,15 +290,10 @@ class ResearchOrchestrator:
         start_time = time.time()
         
         logger.info(f"Starting research workflow for: {request.question}")
-
-        conversation_history = self._normalize_conversation_history(getattr(request, "conversation_history", []) or [])
-        conversation_memory = self._build_conversation_memory(conversation_history)
         
         # Initialize state as dict (LangGraph StateGraph requires dict input)
         initial_state = {
             "original_question": request.question,
-            "conversation_history": conversation_history,
-            "conversation_memory": conversation_memory,
             "intent": None,
             "search_query": None,
             "search_results": [],
@@ -435,18 +362,8 @@ class ResearchOrchestrator:
         """Node: Classify student intent and question characteristics"""
         logger.info("NODE: Classifying intent...")
         self._emit_progress(state, "Classifying question intent...")
-
-        if isinstance(state, dict):
-            original_question = state["original_question"]
-            conversation_history = state.get("conversation_history", [])
-            conversation_memory = state.get("conversation_memory", "")
-        else:
-            original_question = state.original_question
-            conversation_history = getattr(state, "conversation_history", [])
-            conversation_memory = getattr(state, "conversation_memory", "")
-
-        contextual_question = self._resolve_contextual_question(original_question, conversation_history)
-        intent = await self.intent_agent.analyze(contextual_question, conversation_memory=conversation_memory)
+        
+        intent = await self.intent_agent.analyze(state["original_question"] if isinstance(state, dict) else state.original_question)
         
         return {"intent": intent}
 
@@ -459,20 +376,16 @@ class ResearchOrchestrator:
             query = state["original_question"]
             intent = state.get("intent")
             metadata = state.get("metadata", {})
-            conversation_history = state.get("conversation_history", [])
         else:
             query = state.original_question
             intent = state.intent
             metadata = state.metadata
-            conversation_history = getattr(state, "conversation_history", [])
 
-        query_for_search = self._resolve_contextual_question(query, conversation_history)
-        plan = self.search_router.plan(query_for_search, intent)
+        plan = self.search_router.plan(query, intent)
 
         # Serialise plan into metadata so downstream nodes can read it
         metadata["search_plan"] = plan
         metadata["search_complexity"] = plan.complexity.value
-        metadata["search_context_question"] = query_for_search
 
         return {"metadata": metadata}
     
@@ -485,21 +398,18 @@ class ResearchOrchestrator:
             base_query = state["original_question"]
             intent = state.get("intent")
             metadata = state.get("metadata", {})
-            conversation_history = state.get("conversation_history", [])
         else:
             base_query = state.original_question
             intent = state.intent
             metadata = state.metadata
-            conversation_history = getattr(state, "conversation_history", [])
 
         plan: SearchPlan = metadata.get("search_plan")
-        search_context_question = metadata.get("search_context_question") or self._resolve_contextual_question(base_query, conversation_history)
 
         if plan:
-            queries = self.search_router.generate_queries(search_context_question, intent, plan)
+            queries = self.search_router.generate_queries(base_query, intent, plan)
         else:
             # Fallback to simple single query
-            queries = [search_context_question]
+            queries = [base_query]
 
         queries = queries[: settings.max_search_queries]
 
@@ -525,20 +435,6 @@ class ResearchOrchestrator:
         self._emit_progress(state, f"Searching web sources ({len(queries)} {query_label})...")
 
         search_results = await self.search_agent.multi_query_search(queries, plan=plan)
-        search_status = self.search_agent.get_last_multi_status()
-        metadata["search_status"] = search_status
-
-        if search_status.get("search_unavailable"):
-            metadata["search_unavailable"] = True
-            error_kind = search_status.get("error_kind", "unknown")
-            logger.warning(
-                "Web search unavailable (kind=%s); proceeding with LLM-only synthesis",
-                error_kind,
-            )
-            self._emit_progress(
-                state,
-                "Web search is temporarily unavailable. Continuing with built-in knowledge.",
-            )
         
         # Collect and aggressively deduplicate image URLs
         all_images = []
@@ -633,10 +529,6 @@ class ResearchOrchestrator:
             clean_topic = " ".join(concepts[:3]) if concepts else "topic"
 
         # Fallback: if no images from primary search, do dedicated image search
-        if not raw_images and metadata.get("search_unavailable"):
-            logger.info("Skipping dedicated image search: web search unavailable")
-            return {"images": images}
-
         if not raw_images:
             logger.info("No images from primary search — running dedicated image search...")
             try:
@@ -819,7 +711,6 @@ class ResearchOrchestrator:
             sources = state.get("sources", [])
             metadata = state.get("metadata", {})
             pecar_output = state.get("pecar_output")
-            conversation_memory = state.get("conversation_memory", "")
         else:
             original_question = state.original_question
             intent = state.intent
@@ -828,7 +719,6 @@ class ResearchOrchestrator:
             sources = state.sources
             metadata = state.metadata
             pecar_output = getattr(state, "pecar_output", None)
-            conversation_memory = getattr(state, "conversation_memory", "")
 
         # Also check metadata for pecar_output (populated by pecar_reasoning_node)
         if not pecar_output:
@@ -840,17 +730,8 @@ class ResearchOrchestrator:
             extracted_content=extracted_content,
             images=images,
             sources=sources,
-            conversation_memory=conversation_memory,
             pecar_output=pecar_output,
         )
-
-        if metadata.get("search_unavailable"):
-            note = (
-                "Note: Live web search was unavailable due to a network/DNS issue. "
-                "This answer may miss very recent updates."
-            )
-            if note not in (teaching_response.tldr or ""):
-                teaching_response.tldr = f"{teaching_response.tldr}\n\n_{note}_"
 
         metadata["teaching_response"] = teaching_response
 
